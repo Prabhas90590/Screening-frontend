@@ -2,7 +2,7 @@ import React from 'react';
 import { useScreening } from '../../context/ScreeningContext';
 import { Badge } from '../common/Badge';
 
-export const ResultsTable = () => {
+export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
   const {
     securities,
     sectors,
@@ -15,6 +15,7 @@ export const ResultsTable = () => {
     filterRegion,
     filterCap,
     searchQuery,
+    resultsTab,
   } = useScreening();
 
   const countryValueByResultCountry = {
@@ -37,7 +38,19 @@ export const ResultsTable = () => {
   };
 
   // Filter logic
-  const filteredSecurities = securities.filter((sec) => {
+  const tabSecurities = resultsTab === 'myHoldings'
+    ? holdings
+    : resultsTab === 'top20'
+      ? securities.filter((security) => security.rank >= 1 && security.rank <= 20)
+      : resultsTab === 'rankNearMisses'
+        ? securities.filter((security) => security.rank >= 21 && security.rank <= 40)
+        : resultsTab === 'ruleNearMisses'
+          ? securities.filter((security) =>
+              Object.values(security.metricStatuses).some((status) => status === 'threshold' || status === 'miss')
+            )
+          : [];
+
+  const filteredSecurities = tabSecurities.filter((sec) => {
     if (!selectedSectorNames.has(sec.sector)) return false;
     if (filterSector !== 'All' && sec.sector !== filterSector) return false;
     if (filterRegion !== 'All') {
@@ -96,6 +109,71 @@ export const ResultsTable = () => {
         return <Badge size="xs">{confidence}</Badge>;
     }
   };
+
+  const emptyStateByTab = {
+    top20: {
+      title: 'No top 20 results',
+      description: 'The top 20 companies from the current screening run will appear here.',
+    },
+    rankNearMisses: {
+      title: 'No rank-based near misses',
+      description: 'Companies ranked 21–40 will appear here when the current result set contains them.',
+    },
+    ruleNearMisses: {
+      title: 'No rule-based near misses',
+      description: 'Companies with threshold or missed metrics will appear here when available.',
+    },
+    myHoldings: {
+      title: 'No holdings added',
+      description: 'Upload a CSV with a ticker, symbol, security, or security_id column to see matching holdings.',
+    },
+    allScreened: {
+      title: 'No screened companies yet',
+      description: 'All companies fetched for the selected countries and exchanges will appear here after a backend screening run.',
+    },
+  };
+
+  if (resultsTab === 'myHoldings' && uploadedHoldingRows.length > 0) {
+    const columns = Object.keys(uploadedHoldingRows[0]);
+    return (
+      <div className="overflow-hidden rounded-lg border border-slate-200/80 bg-white shadow-2xs">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left text-xs">
+            <thead>
+              <tr className="border-b border-slate-200/80 bg-slate-50/70 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                {columns.map((column) => (
+                  <th key={column} className="whitespace-nowrap px-3 py-2.5">{column}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {uploadedHoldingRows.map((row, rowIndex) => (
+                <tr key={`holding-${rowIndex}`} className="hover:bg-slate-50/80">
+                  {columns.map((column) => (
+                    <td key={`${rowIndex}-${column}`} className="whitespace-nowrap px-3 py-3 text-slate-700">
+                      {row[column] || '—'}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  if (filteredSecurities.length === 0) {
+    const emptyState = emptyStateByTab[resultsTab] || emptyStateByTab.top20;
+    return (
+      <div className="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+        <h2 className="text-sm font-semibold text-slate-800">{emptyState.title}</h2>
+        <p className="mx-auto mt-2 max-w-xl text-xs leading-5 text-slate-500">
+          {emptyState.description}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-lg border border-slate-200/80 shadow-2xs overflow-hidden">

@@ -16,6 +16,6 @@ export const ResultsLegend = () => {
         <span>misses threshold</span>
       </div>
     </div>
-  );
+  ); 
 };
 

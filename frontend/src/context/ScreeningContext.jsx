@@ -17,7 +17,7 @@ const ScreeningContext = createContext(null);
 export const ScreeningProvider = ({ children }) => {
   const [activeNav, setActiveNav] = useState('rules'); // 'rules' | 'results' | 'schedule'
   const [rulesTab, setRulesTab] = useState('profiles'); // 'configuration' | 'profiles'
-  const [resultsTab, setResultsTab] = useState('top20'); // 'top20' | 'nearMisses' | 'myHoldings' | 'allScreened'
+  const [resultsTab, setResultsTab] = useState('top20'); // 'top20' | 'rankNearMisses' | 'ruleNearMisses' | 'myHoldings' | 'allScreened'
   const [selectedProfileName, setSelectedProfileName] = useState('');
   const [draftProfileName, setDraftProfileName] = useState('');
 
@@ -381,37 +381,6 @@ export const ScreeningProvider = ({ children }) => {
     return true;
   };
 
-  const saveConfigurationInVersion = (versionId, configuration) => {
-    const target = versionHistory.find((item) => item.id === versionId || item.version === versionId);
-    if (!target) return;
-
-    setVersionHistory((prev) =>
-      prev.map((item) =>
-        item.id === versionId || item.version === versionId
-          ? {
-              ...item,
-              snapshot: configuration,
-              date: new Date().toLocaleDateString('en-GB', {
-                day: '2-digit',
-                month: 'short',
-                year: 'numeric',
-              }),
-              by: 'PM',
-              changeSummary: 'Version rules updated',
-            }
-          : item
-      )
-    );
-    setProfiles((prev) =>
-      prev.map((profile) =>
-        profile.profileKey === target.profileKey &&
-        profile.versionNumber === target.versionNumber
-          ? { ...profile, snapshot: configuration }
-          : profile
-      )
-    );
-  };
-
   const beginVersionEdit = (versionId) => {
     const target = versionHistory.find((item) => item.id === versionId || item.version === versionId);
     if (!target?.snapshot) return;
@@ -437,62 +406,6 @@ export const ScreeningProvider = ({ children }) => {
     setDiversification({ ...INITIAL_DIVERSIFICATION });
   };
 
-  const getScreeningRulesPayload = () => ({
-    ruleCatalog: {
-      metrics: ruleMetrics,
-    },
-    sectorLimits,
-    countries: countries.map(({ id, name, selected }) => ({ id, name, selected })),
-    exchanges: exchanges.map(({ id, name, countryId, selected }) => ({ id, name, countryId, selected })),
-    diversification,
-    sectors,
-  });
-
-  const exportDataToExcel = () => {
-    const headers = [
-      'Rank',
-      'Security',
-      'Ticker',
-      'Sector',
-      'Score',
-      'FWD P/E',
-      'PEG',
-      'EV/EBITDA',
-      'Beta',
-      'ND/EBITDA',
-      'Yield %',
-      'EPS Gr %',
-      'Data Confidence',
-      'Decision',
-    ];
-    const rows = securities.map((s) => [
-      s.rank,
-      `"${s.name}"`,
-      s.ticker,
-      s.sector,
-      s.score,
-      s.fwdPe,
-      s.peg,
-      s.evEbitda,
-      s.beta,
-      `"${s.ndEbitda}"`,
-      `${s.yieldPct}%`,
-      `${s.epsGrowthPct}%`,
-      s.dataConfidence,
-      s.decision || 'Pending',
-    ]);
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `equity_screener_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   return (
     <ScreeningContext.Provider
       value={{
@@ -503,7 +416,6 @@ export const ScreeningProvider = ({ children }) => {
         resultsTab,
         setResultsTab,
         selectedProfileName,
-        setSelectedProfileName,
         draftProfileName,
         setDraftProfileName,
         selectedSecurity,
@@ -539,7 +451,6 @@ export const ScreeningProvider = ({ children }) => {
         saveAsNewVersion,
         saveConfigurationAsNewVersion,
         deleteVersion,
-        saveConfigurationInVersion,
         discardChanges,
         loadConfiguration,
         countries,
@@ -550,8 +461,6 @@ export const ScreeningProvider = ({ children }) => {
         toggleSector,
         diversification,
         updateDiversification,
-        getScreeningRulesPayload,
-        exportDataToExcel,
       }}
     >
       {children}
