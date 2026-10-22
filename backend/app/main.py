@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import logging
 import time
 from uuid import uuid4
@@ -9,14 +10,26 @@ from app.api.routes.health import router as health_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
+from app.db.connection import db_manager
 
 configure_logging(settings.debug)
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifecycle event: initialize database tables automatically on server startup."""
+    logger.info("Server starting up: verifying database tables...")
+    db_manager.init_tables()
+    yield
+    logger.info("Server shutting down.")
+
 
 app = FastAPI(
     title="Screening Frontend API",
     description="Backend API for the equity screening application.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

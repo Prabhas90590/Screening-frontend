@@ -22,7 +22,7 @@ export const ScreeningProvider = ({ children }) => {
   const [draftProfileName, setDraftProfileName] = useState('');
 
   const [securities, setSecurities] = useState(INITIAL_SECURITIES);
-  const [selectedSecurityId, setSelectedSecurityId] = useState('hmp');
+  const [selectedSecurityId, setSelectedSecurityId] = useState(null);
 
   const [filterSector, setFilterSector] = useState('All');
   const [filterRegion, setFilterRegion] = useState('All');

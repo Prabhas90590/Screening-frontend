@@ -134,7 +134,7 @@
    - Add common error responses.
    - Prepare database connection handling.
 
-   ## Phase 2: Common data contracts
+   ## Phase 2: Common data contracts (Completed)
 
    ### Purpose
 
@@ -165,7 +165,7 @@
    }
    ```
 
-   ## Phase 3: Mock data provider
+   ## Phase 3: Mock data provider (Completed)
 
    ### Purpose
 
@@ -189,7 +189,7 @@
 
    Mock data must be clearly identified as development data.
 
-   ## Phase 4: Replaceable vendor adapter
+   ## Phase 4: Replaceable vendor adapter (Completed)
 
    ### Purpose
 
@@ -216,7 +216,7 @@
 
    API keys must never be committed to Git or written to frontend code.
 
-   ## Phase 5: Raw response storage
+   ## Phase 5: Raw response storage (Completed)
 
    ### Purpose
 
