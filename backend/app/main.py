@@ -7,6 +7,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.health import router as health_router
+from app.api.routes.rules import router as rules_router
+from app.api.routes.screening import router as screening_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
@@ -61,3 +63,17 @@ async def request_logging_middleware(request: Request, call_next):
 
 register_error_handlers(app)
 app.include_router(health_router)
+app.include_router(screening_router)
+app.include_router(rules_router)
+
+
+@app.get("/", tags=["root"])
+def root():
+    """Welcome endpoint providing status and links to interactive documentation."""
+    return {
+        "status": "online",
+        "service": "Equity Screening API",
+        "documentation": "/docs",
+        "health_check": "/health",
+    }
+

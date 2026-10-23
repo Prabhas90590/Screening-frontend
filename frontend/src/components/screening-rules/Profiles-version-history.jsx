@@ -27,7 +27,7 @@ export const VersionSaveActions = ({ triggerLabel = 'Save profile', showDiscard 
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
 
-  const saveVersion = (event) => {
+  const saveVersion = async (event) => {
     event.preventDefault();
     if (!name.trim()) {
       setError(`Enter a name for this ${addProfile ? 'profile' : 'version'}.`);
@@ -51,7 +51,7 @@ export const VersionSaveActions = ({ triggerLabel = 'Save profile', showDiscard 
       setRulesTab('configuration');
       return;
     }
-    const result = saveAsNewVersion(name);
+    const result = await saveAsNewVersion(name);
     if (!result?.saved) {
       setWarning('No changes were made to any metric or rule in the Rule Catalog. Nothing was saved.');
       return;
@@ -64,7 +64,7 @@ export const VersionSaveActions = ({ triggerLabel = 'Save profile', showDiscard 
     setRulesTab('profiles');
   };
 
-  const saveEditedVersion = () => {
+  const saveEditedVersion = async () => {
     const configuration = {
       metrics: ruleMetrics.map((metric) => ({ ...metric })),
       sectorLimits: sectorLimits.map((limit) => ({ ...limit })),
@@ -74,7 +74,7 @@ export const VersionSaveActions = ({ triggerLabel = 'Save profile', showDiscard 
       diversification: { ...diversification },
     };
 
-    const result = saveConfigurationAsNewVersion(
+    const result = await saveConfigurationAsNewVersion(
       editingVersion.name,
       configuration,
       editingVersion.profileKey,
@@ -271,7 +271,7 @@ export const ProfilesVersionHistory = () => {
               <button type="button" onClick={() => setVersionToDelete(null)} className="rounded-md border border-slate-300 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
               <button
                 type="button"
-                onClick={() => { deleteVersion(versionToDelete.id || versionToDelete.version); setVersionToDelete(null); }}
+                onClick={async () => { await deleteVersion(versionToDelete.id || versionToDelete.version); setVersionToDelete(null); }}
                 className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700"
               >
                 <Trash2 size={13} aria-hidden="true" />Delete version

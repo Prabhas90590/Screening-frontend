@@ -59,6 +59,18 @@ class DiagnosticLogger:
         self._logger = logging.getLogger(f"app.{component}")
         self.component = component
 
+    def info(self, message: str, *args, **kwargs):
+        self._logger.info(message, *args, **kwargs)
+
+    def warning(self, message: str, *args, **kwargs):
+        self._logger.warning(message, *args, **kwargs)
+
+    def error(self, message: str, *args, **kwargs):
+        self._logger.error(message, *args, **kwargs)
+
+    def debug(self, message: str, *args, **kwargs):
+        self._logger.debug(message, *args, **kwargs)
+
     def provider_info(self, provider: str, message: str, *args):
         self._logger.info(f"[PROVIDER:{provider.upper()}] {message}", *args)
 
@@ -82,3 +94,12 @@ class DiagnosticLogger:
 
     def rule_info(self, stage: str, ticker: str, message: str, *args):
         self._logger.info(f"[RULE:{stage.upper()}:{ticker}] {message}", *args)
+
+    def sec_master_info(self, entity_id: str, message: str, *args):
+        self._logger.info(f"[SEC_MASTER:{entity_id}] {message}", *args)
+
+    def sec_master_resolve(self, ticker: str, canonical_id: str, reason: str, *args):
+        self._logger.info(f"[SEC_MASTER:RESOLVE] Linked '{ticker}' -> canonical '{canonical_id}' via {reason}", *args)
+
+    def sec_master_warn(self, entity_id: str, message: str, *args):
+        self._logger.warning(f"[SEC_MASTER:{entity_id}] {message}", *args)
