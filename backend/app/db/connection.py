@@ -152,6 +152,8 @@ CREATE TABLE IF NOT EXISTS rule_versions (
     description TEXT,
     sector_limits JSONB DEFAULT '{}',
     diversification_rules JSONB DEFAULT '{}',
+    changes JSONB DEFAULT '[]',
+    selected_countries JSONB DEFAULT '[]',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -180,6 +182,7 @@ CREATE TABLE IF NOT EXISTS screening_runs (
     display_currency VARCHAR(8) DEFAULT 'USD',
     selected_countries JSONB DEFAULT '[]',
     selected_exchanges JSONB DEFAULT '[]',
+    selected_countries JSONB DEFAULT '[]',
     rules_snapshot JSONB DEFAULT '[]',
     duration_ms DOUBLE PRECISION DEFAULT 0.0,
     started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -417,6 +420,8 @@ CREATE TABLE IF NOT EXISTS rule_versions (
     description TEXT,
     sector_limits JSONB DEFAULT '{}',
     diversification_rules JSONB DEFAULT '{}',
+    changes JSONB DEFAULT '[]',
+    selected_countries JSONB DEFAULT '[]',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -445,6 +450,7 @@ CREATE TABLE IF NOT EXISTS screening_runs (
     display_currency VARCHAR(8) DEFAULT 'USD',
     selected_countries JSONB DEFAULT '[]',
     selected_exchanges JSONB DEFAULT '[]',
+    selected_countries JSONB DEFAULT '[]',
     rules_snapshot JSONB DEFAULT '[]',
     duration_ms DOUBLE PRECISION DEFAULT 0.0,
     started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -590,6 +596,8 @@ class DatabaseManager:
             if is_postgres_active:
                 logger.info("Initializing PostgreSQL database schema (raw_responses, companies, listings, screening_runs, results, rules, snapshots)...")
                 cursor.execute(POSTGRES_SCHEMA_SQL)
+                cursor.execute("ALTER TABLE rule_versions ADD COLUMN IF NOT EXISTS changes JSONB DEFAULT '[]';")
+                cursor.execute("ALTER TABLE rule_versions ADD COLUMN IF NOT EXISTS selected_countries JSONB DEFAULT '[]';")
                 conn.commit()
                 logger.info("PostgreSQL persistence tables verified/created successfully.")
             else:

@@ -17,8 +17,8 @@ class MetricScoreBreakdownItem(BaseModel):
     value_display: str = Field(..., description="Formatted actual value, e.g. '$10.4' or '3.4x'")
     benchmark_display: str = Field(default="", description="Benchmark target or constraint, e.g. 'vs S&P 22.5'")
     percentage: float = Field(..., description="Score ratio 0-100")
-    status: Literal["full", "threshold", "miss", "off"] = Field(
-        default="full", description="Pass/threshold/miss status"
+    status: Literal["full", "threshold", "miss", "off", "exempt"] = Field(
+        default="full", description="Pass/threshold/miss/exempt status"
     )
 
 

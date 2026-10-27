@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Pencil, Play, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Globe, Pencil, Play, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import { useScreening } from '../../context/ScreeningContext';
 
 const conditions = ['>=', '<=', '=', '<', '>', 'discount', 'sector table'];
@@ -184,11 +184,10 @@ export const ProfilesVersionHistory = () => {
           </div>
           <div className="mt-3 flex flex-wrap gap-3">
             {profiles.length === 0 ? <EmptyState text="No profiles saved yet. Configure rules and save a new profile." /> : profileGroups.map((profile) => (
-              <button
+              <div
                 key={profile.profileKey}
-                type="button"
                 onClick={() => setSelectedProfileKey(profile.profileKey)}
-                className={`min-w-52 rounded-md border p-3 text-left ${
+                className={`min-w-56 cursor-pointer rounded-md border p-3 text-left transition-all ${
                   profile.profileKey === activeProfileKey
                     ? 'border-[#238c83] bg-[#f1faf8] shadow-sm'
                     : 'border-slate-200 bg-white hover:border-[#9bcfc8]'
@@ -199,8 +198,21 @@ export const ProfilesVersionHistory = () => {
                   <span className="text-[10px] font-bold text-slate-500">Version {profile.versionNumber}</span>
                 </div>
                 <p className="mt-1 text-xs text-slate-500">{profile.description}</p>
-                <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${profile.isActive ? 'bg-[#238c83] text-white' : 'bg-slate-100 text-slate-600'}`}>{profile.isActive ? 'Active' : profile.badge}</span>
-              </button>
+                <div className="mt-2.5 flex items-center justify-between gap-2">
+                  <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${profile.isActive ? 'bg-[#238c83] text-white' : 'bg-slate-100 text-slate-600'}`}>{profile.isActive ? 'Active' : profile.badge}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      beginVersionEdit(profile.id || profile.version);
+                    }}
+                    className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 shadow-2xs hover:bg-[#147b73] hover:text-white hover:border-[#147b73] transition-colors"
+                  >
+                    <Pencil size={11} aria-hidden="true" />
+                    Edit
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         </section>
@@ -218,6 +230,19 @@ export const ProfilesVersionHistory = () => {
                   )}
                 </p>
               </div>
+              {selectedHistory.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = selectedHistory.find((item) => item.isCurrent) || selectedHistory[0] || selectedProfile;
+                    beginVersionEdit(target.id || target.version);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-[#147b73] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0f675f] shadow-2xs transition-colors"
+                >
+                  <Pencil size={12} aria-hidden="true" />
+                  Edit active version
+                </button>
+              )}
             </div>
             <div className="mt-3 space-y-2">
             {selectedHistory.length === 0 ? <EmptyState text="No versions saved for this profile." /> : selectedHistory.map((item) => (
@@ -233,6 +258,12 @@ export const ProfilesVersionHistory = () => {
                     <span className="text-sm font-semibold text-slate-800">{item.name || selectedProfile.name}</span>
                     <span className="text-xs font-bold text-[#147b73]">v{item.versionNumber}</span>
                     {item.isCurrent && <span className="rounded-full bg-[#e1f0ed] px-2 py-0.5 text-[10px] font-bold text-[#147b73]">Active</span>}
+                    {item.selectedCountries && item.selectedCountries.length > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                        <Globe size={10} className="text-slate-500" />
+                        {item.selectedCountries.length} {item.selectedCountries.length === 1 ? 'country' : 'countries'}
+                      </span>
+                    )}
                     <span className="hidden text-[11px] text-slate-400 sm:inline">{item.date} · {item.by}</span>
                   </button>
                   <div className="flex shrink-0 gap-1.5">
@@ -242,16 +273,72 @@ export const ProfilesVersionHistory = () => {
                   </div>
                 </div>
                 {expandedVersionId === item.id && (
-                  <div className="border-t border-slate-100 px-3 pb-3 pt-2">
-                    <p className="text-[11px] text-slate-500">{item.changeSummary}</p>
-                    {item.editedFromVersion && <p className="mt-1 text-[11px] font-semibold text-[#147b73]">Edited from Version {item.editedFromVersion}</p>}
-                    {item.changes?.length > 0 && (
-                      <div className="mt-2 rounded-md bg-slate-50 px-3 py-2">
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Changes from previous version</p>
-                        <ul className="mt-1 list-disc pl-4 text-[11px] text-slate-600">{item.changes.map((change) => <li key={change}>{change}</li>)}</ul>
+                  <div className="border-t border-slate-100 px-3 pb-3 pt-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold text-slate-700">{item.changeSummary}</p>
+                      {item.editedFromVersion && (
+                        <span className="rounded bg-[#f0f9f8] px-2 py-0.5 text-[10px] font-semibold text-[#147b73] border border-[#9bcfc8]/40">
+                          Derived from Version {item.editedFromVersion}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-2 rounded-md border border-slate-200 bg-slate-50/70 p-3">
+                      <div className="flex items-center justify-between border-b border-slate-200/60 pb-1.5">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                          <span className="inline-block h-2 w-2 rounded-full bg-[#147b73]"></span>
+                          Comparison Changes from Previous Version
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          {item.changes?.length || 0} modified criteria
+                        </span>
                       </div>
-                    )}
-                    {item.snapshot && <VersionConfigurationSummary snapshot={item.snapshot} />}
+                      {item.changes && item.changes.length > 0 ? (
+                        <ul className="mt-2 space-y-1.5">
+                          {item.changes.map((change, idx) => {
+                            const isCountryAdd = change.startsWith('Added country:');
+                            const isCountryRem = change.startsWith('Removed country:');
+                            const isCountry = isCountryAdd || isCountryRem || change.toLowerCase().includes('country');
+                            const isExchange = change.startsWith('Added exchange:') || change.startsWith('Removed exchange:');
+
+                            return (
+                              <li
+                                key={idx}
+                                className={`flex items-start gap-2 rounded border px-2.5 py-1.5 text-xs shadow-2xs ${
+                                  isCountryAdd
+                                    ? 'border-emerald-200 bg-emerald-50/60 text-emerald-900'
+                                    : isCountryRem
+                                    ? 'border-rose-200 bg-rose-50/60 text-rose-900'
+                                    : isCountry || isExchange
+                                    ? 'border-sky-200 bg-sky-50/60 text-sky-900'
+                                    : 'border-slate-200/80 bg-white text-slate-800'
+                                }`}
+                              >
+                                {isCountryAdd ? (
+                                  <span className="mt-0.5 inline-flex items-center gap-0.5 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800 uppercase tracking-wider">
+                                    <Globe size={9} /> + Country
+                                  </span>
+                                ) : isCountryRem ? (
+                                  <span className="mt-0.5 inline-flex items-center gap-0.5 rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold text-rose-800 uppercase tracking-wider">
+                                    <Globe size={9} /> - Country
+                                  </span>
+                                ) : isExchange ? (
+                                  <span className="mt-0.5 inline-flex items-center gap-0.5 rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-800 uppercase tracking-wider">
+                                    Market
+                                  </span>
+                                ) : (
+                                  <span className="text-[#147b73] font-bold mt-0.5">•</span>
+                                )}
+                                <span className="font-medium pt-0.5">{change}</span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 text-xs text-slate-500 italic">
+                          No criteria were changed from the previous version.
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -285,45 +372,3 @@ export const ProfilesVersionHistory = () => {
 };
 
 const EmptyState = ({ text }) => <p className="rounded-md border border-dashed border-slate-300 p-4 text-xs text-slate-500">{text}</p>;
-
-const VersionConfigurationSummary = ({ snapshot }) => (
-  <div className="mt-2 grid grid-cols-1 gap-2 border-t border-slate-100 pt-2 text-[10px] text-slate-600 md:grid-cols-4">
-    <div className="min-w-52">
-      <p className="font-semibold text-slate-800">Rules assigned</p>
-      <div className="mt-1 space-y-1">
-        {snapshot.metrics.map((metric) => (
-          <p key={metric.name}>
-            <span className="font-semibold">{metric.name}</span>
-            {' · '}
-            {metric.mode || 'Off'}
-            {metric.condition && ` · ${metric.condition}`}
-            {metric.value !== '' && metric.value !== undefined && ` ${metric.value}`}
-            {metric.weight !== '' && metric.weight !== undefined && ` · Weight ${metric.weight}`}
-          </p>
-        ))}
-      </div>
-    </div>
-    <div>
-      <p className="font-semibold text-slate-800">Limits</p>
-      <div className="mt-1 space-y-1">
-        {snapshot.sectorLimits.map((limit) => (
-          <p key={limit.sector}><span className="font-semibold">{limit.sector}:</span> {limit.limit || 'Not set'}{limit.note ? ` · ${limit.note}` : ''}</p>
-        ))}
-      </div>
-    </div>
-    <div>
-      <p className="font-semibold text-slate-800">Universe</p>
-      <p className="mt-1">
-        {snapshot.countries.filter((country) => country.selected).map((country) => country.name).join(', ') || 'No countries selected'}
-      </p>
-    </div>
-    <div>
-      <p className="font-semibold text-slate-800">Diversification</p>
-      <div className="mt-1 space-y-1">
-        {Object.entries(snapshot.diversification).map(([key, value]) => (
-          <p key={key}><span className="font-semibold">{key}:</span> {value === '' ? 'Not set' : value}</p>
-        ))}
-      </div>
-    </div>
-  </div>
-);

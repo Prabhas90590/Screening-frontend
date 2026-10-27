@@ -29,31 +29,37 @@ class RuleRepository:
         insert_sql = """
             INSERT INTO rule_versions (
                 version_id, profile_name, version_number, is_active,
-                description, sector_limits, diversification_rules, created_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                description, sector_limits, diversification_rules, changes, selected_countries, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (version_id) DO UPDATE SET
                 profile_name = EXCLUDED.profile_name,
                 is_active = EXCLUDED.is_active,
                 description = EXCLUDED.description,
                 sector_limits = EXCLUDED.sector_limits,
                 diversification_rules = EXCLUDED.diversification_rules,
+                changes = EXCLUDED.changes,
+                selected_countries = EXCLUDED.selected_countries,
                 updated_at = EXCLUDED.updated_at;
         """ if is_postgres else """
             INSERT INTO rule_versions (
                 version_id, profile_name, version_number, is_active,
-                description, sector_limits, diversification_rules, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                description, sector_limits, diversification_rules, changes, selected_countries, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (version_id) DO UPDATE SET
                 profile_name = excluded.profile_name,
                 is_active = excluded.is_active,
                 description = excluded.description,
                 sector_limits = excluded.sector_limits,
                 diversification_rules = excluded.diversification_rules,
+                changes = excluded.changes,
+                selected_countries = excluded.selected_countries,
                 updated_at = excluded.updated_at;
         """
 
         sector_limits_json = json.dumps(version.sector_limits)
         diversification_json = json.dumps(version.diversification_rules)
+        changes_json = json.dumps(version.changes or [])
+        countries_json = json.dumps(version.selected_countries or [])
         created_at_val = version.created_at if is_postgres else version.created_at.isoformat()
         updated_at_val = version.updated_at if is_postgres else version.updated_at.isoformat()
         is_active_val = version.is_active if is_postgres else (1 if version.is_active else 0)
@@ -66,6 +72,8 @@ class RuleRepository:
             version.description,
             sector_limits_json,
             diversification_json,
+            changes_json,
+            countries_json,
             created_at_val,
             updated_at_val,
         )
@@ -92,7 +100,7 @@ class RuleRepository:
         """Fetch the currently active screening profile."""
         conn = db_manager.get_connection()
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-        query = "SELECT * FROM rule_versions WHERE is_active = TRUE LIMIT 1" if is_postgres else "SELECT * FROM rule_versions WHERE is_active = 1 LIMIT 1"
+        query = "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, diversification_rules, changes, selected_countries, created_at, updated_at FROM rule_versions WHERE is_active = TRUE LIMIT 1" if is_postgres else "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, diversification_rules, changes, selected_countries, created_at, updated_at FROM rule_versions WHERE is_active = 1 LIMIT 1"
 
         try:
             cursor = conn.cursor()
@@ -110,7 +118,7 @@ class RuleRepository:
         """List all saved rule profiles."""
         conn = db_manager.get_connection()
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-        query = "SELECT * FROM rule_versions ORDER BY is_active DESC, updated_at DESC"
+        query = "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, diversification_rules, changes, selected_countries, created_at, updated_at FROM rule_versions ORDER BY is_active DESC, updated_at DESC"
 
         try:
             cursor = conn.cursor()
@@ -127,7 +135,7 @@ class RuleRepository:
         """Fetch a specific rule profile by its version ID."""
         conn = db_manager.get_connection()
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-        query = "SELECT * FROM rule_versions WHERE version_id = %s" if is_postgres else "SELECT * FROM rule_versions WHERE version_id = ?"
+        query = "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, diversification_rules, changes, selected_countries, created_at, updated_at FROM rule_versions WHERE version_id = %s" if is_postgres else "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, diversification_rules, changes, selected_countries, created_at, updated_at FROM rule_versions WHERE version_id = ?"
 
         try:
             cursor = conn.cursor()
@@ -281,6 +289,28 @@ class RuleRepository:
 
     def _row_to_version(self, row: Any, is_postgres: bool) -> RuleVersionRecord:
         if is_postgres:
+            raw_changes = row[7]
+            if isinstance(raw_changes, list):
+                parsed_changes = raw_changes
+            elif isinstance(raw_changes, str):
+                try:
+                    parsed_changes = json.loads(raw_changes)
+                except Exception:
+                    parsed_changes = [raw_changes] if raw_changes else []
+            else:
+                parsed_changes = []
+
+            raw_countries = row[8]
+            if isinstance(raw_countries, list):
+                parsed_countries = raw_countries
+            elif isinstance(raw_countries, str):
+                try:
+                    parsed_countries = json.loads(raw_countries)
+                except Exception:
+                    parsed_countries = [raw_countries] if raw_countries else []
+            else:
+                parsed_countries = []
+
             return RuleVersionRecord(
                 version_id=row[0],
                 profile_name=row[1],
@@ -289,10 +319,24 @@ class RuleRepository:
                 description=row[4],
                 sector_limits=row[5] if isinstance(row[5], dict) else json.loads(row[5] or "{}"),
                 diversification_rules=row[6] if isinstance(row[6], dict) else json.loads(row[6] or "{}"),
-                created_at=row[7] if isinstance(row[7], datetime) else datetime.fromisoformat(str(row[7])),
-                updated_at=row[8] if isinstance(row[8], datetime) else datetime.fromisoformat(str(row[8])),
+                changes=parsed_changes,
+                selected_countries=parsed_countries,
+                created_at=row[9] if isinstance(row[9], datetime) else datetime.fromisoformat(str(row[9])),
+                updated_at=row[10] if isinstance(row[10], datetime) else datetime.fromisoformat(str(row[10])),
             )
         else:
+            raw_changes = row["changes"] if "changes" in row.keys() else "[]"
+            try:
+                parsed_changes = json.loads(raw_changes or "[]")
+            except Exception:
+                parsed_changes = []
+
+            raw_countries = row["selected_countries"] if "selected_countries" in row.keys() else "[]"
+            try:
+                parsed_countries = json.loads(raw_countries or "[]")
+            except Exception:
+                parsed_countries = []
+
             return RuleVersionRecord(
                 version_id=row["version_id"],
                 profile_name=row["profile_name"],
@@ -301,6 +345,8 @@ class RuleRepository:
                 description=row["description"],
                 sector_limits=json.loads(row["sector_limits"] or "{}"),
                 diversification_rules=json.loads(row["diversification_rules"] or "{}"),
+                changes=parsed_changes,
+                selected_countries=parsed_countries,
                 created_at=datetime.fromisoformat(str(row["created_at"])),
                 updated_at=datetime.fromisoformat(str(row["updated_at"])),
             )

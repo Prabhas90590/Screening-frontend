@@ -1,6 +1,6 @@
 import React from 'react';
+import { ResultsSummaryCards } from './ResultsSummaryCards';
 import { ResultsFilterBar } from './ResultsFilterBar';
-import { FunnelPipeline } from './FunnelPipeline';
 import { ResultsTable } from './ResultsTable';
 import { SecurityDetailDrawer } from './SecurityDetailDrawer';
 import { ResultsLegend } from './ResultsLegend';
@@ -15,17 +15,24 @@ export const ResultsView = () => {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Main Table Content */}
-      <div className="flex-1 p-8 overflow-y-auto space-y-5">
+      <div className="flex-1 p-6 md:p-8 overflow-y-auto space-y-4">
+        {/* 1. Modern 3-Card Summary, Turnover & Strategy Comparison Header */}
+        <ResultsSummaryCards />
+
+        {/* 2. 4 Clean Tabs (Top 20, Changes, Near Misses, My Holdings) & Sub-Pills */}
         <ResultsFilterBar
           {...holdingsImport}
           exportResults={() => exportResultsToCsv(securities)}
         />
-        {resultsTab !== 'myHoldings' && <FunnelPipeline />}
+
+        {/* 3. Streamlined 7-Column Results Table */}
         <ResultsTable {...holdingsImport} />
+
+        {/* 4. Results Legend / Footnote */}
         <ResultsLegend />
       </div>
 
-      {/* Slide-over Inspector Drawer */}
+      {/* 5. Slide-Over Inspector Drawer with 16-Metric Breakdown & Before vs After comparison */}
       {selectedSecurity && <SecurityDetailDrawer />}
     </div>
   );

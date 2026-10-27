@@ -6,7 +6,28 @@ and the catalog specification of all 16 standard screening metrics.
 
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+# Institutional catalog boundary limits (min, max) for threshold values
+CATALOG_BOUNDS = {
+    "market_cap": (50_000_000.0, 4_000_000_000_000.0),
+    "price_usd": (0.50, 5_000.0),
+    "avg_volume": (10_000.0, 500_000_000.0),
+    "avg_traded_value": (50_000.0, 5_000_000_000.0),
+    "forward_pe": (1.0, 150.0),
+    "pe_vs_benchmark": (-30.0, 60.0),
+    "peg": (0.1, 5.0),
+    "ev_ebitda": (1.0, 60.0),
+    "price_to_sales": (0.1, 30.0),
+    "price_to_cash_flow": (1.0, 50.0),
+    "net_debt_ebitda": (-5.0, 15.0),
+    "beta": (0.2, 3.0),
+    "eps_growth_fwd": (-20.0, 100.0),
+    "revenue_growth_fwd": (-15.0, 80.0),
+    "dividend_yield": (0.0, 20.0),
+    "data_confidence": (1.0, 3.0),
+}
 
 
 class RuleMetricItem(BaseModel):
@@ -18,7 +39,33 @@ class RuleMetricItem(BaseModel):
     condition: str = Field(default=">=", description="Operator: >=, <=, =, <, >")
     value: float = Field(default=0.0, description="Numeric threshold")
     value_display: str = Field(default="", description="Display formatted string, e.g. '<= 25.0x'")
-    weight: float = Field(default=0.0, description="Weight percentage in scoring engine (0-100)")
+    weight: float = Field(default=0.0, ge=0.0, le=100.0, description="Weight percentage in scoring engine (0-100)")
+
+    @model_validator(mode="after")
+    def validate_modes_weights_and_bounds(self) -> "RuleMetricItem":
+        """Input validation ensuring modes, weights, and values adhere to institutional screening rules."""
+        # 1. Enforce mode vs weight constraints
+        if self.mode in ("Off", "Req."):
+            # Gates and Off rules NEVER distribute score points
+            self.weight = 0.0
+        elif self.mode in ("Score", "Both"):
+            # Scoring rules must have a positive weight; if 0, assign a sensible default (10.0%)
+            if self.weight <= 0.0:
+                self.weight = 10.0
+
+        # 2. Validate value bounds if metric is recognized in catalog
+        metric_key = self.id.lower().replace("-", "_")
+        for key, (min_lim, max_lim) in CATALOG_BOUNDS.items():
+            if key in metric_key:
+                if self.mode != "Off":
+                    if self.value < min_lim or self.value > max_lim:
+                        raise ValueError(
+                            f"Rule '{self.name}' ({self.id}): value {self.value} is outside valid "
+                            f"institutional limits ({min_lim} to {max_lim})"
+                        )
+                break
+
+        return self
 
 
 class RuleProfileSchema(BaseModel):
@@ -30,6 +77,8 @@ class RuleProfileSchema(BaseModel):
     description: Optional[str] = None
     sector_limits: Dict[str, float] = Field(default_factory=dict)
     diversification_rules: Dict[str, Any] = Field(default_factory=dict)
+    changes: List[str] = Field(default_factory=list, description="Comparison diff from previous version")
+    selected_countries: List[str] = Field(default_factory=list, description="Selected country names")
     rules: List[RuleMetricItem] = Field(default_factory=list)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -43,6 +92,8 @@ class CreateProfileRequest(BaseModel):
     is_active: bool = Field(default=False)
     sector_limits: Dict[str, float] = Field(default_factory=dict)
     diversification_rules: Dict[str, Any] = Field(default_factory=dict)
+    changes: List[str] = Field(default_factory=list, description="Comparison diff from previous version")
+    selected_countries: List[str] = Field(default_factory=list, description="Selected country names")
     rules: List[RuleMetricItem] = Field(default_factory=list)
 
 
@@ -52,6 +103,8 @@ class UpdateProfileRequest(BaseModel):
     description: Optional[str] = None
     sector_limits: Optional[Dict[str, float]] = None
     diversification_rules: Optional[Dict[str, Any]] = None
+    changes: Optional[List[str]] = None
+    selected_countries: Optional[List[str]] = None
     rules: Optional[List[RuleMetricItem]] = None
 
 

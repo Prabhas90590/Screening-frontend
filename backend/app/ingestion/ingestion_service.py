@@ -25,6 +25,7 @@ from app.repositories.snapshot_repository import snapshot_repository
 from app.schemas.normalized_data import NormalizedSecurityData
 from app.security_master.company_service import company_service
 from app.security_master.listing_service import listing_service
+from app.services.metrics_service import metrics_service
 
 logger = DiagnosticLogger("ingestion_service")
 
@@ -181,15 +182,25 @@ class IngestionService:
                 beta=sec.price.beta,
                 revenue=sec.financials.revenue,
                 ebitda=sec.financials.ebitda,
+                # Phase 10 needs total_debt and cash separately for EV/EBITDA
+                total_debt=sec.financials.total_debt,
+                cash=sec.financials.cash_and_equivalents,
                 net_debt=sec.financials.net_debt,
                 dividend_yield=sec.financials.dividend_yield_pct,
                 eps_growth_fwd=sec.estimates.eps_growth_fwd_pct,
+                revenue_growth_fwd=sec.estimates.revenue_growth_fwd_pct,
                 data_confidence=sec.data_confidence,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
             )
             self.metrics_repo.save_metrics(metrics_record)
             metrics_count += 1
+
+        # Run Phase 10 Metrics Engine to calculate derived ratios immediately
+        try:
+            metrics_service.run_batch_metrics()
+        except Exception as e:
+            logger.error(f'[INGEST:METRICS:ERROR] Failed to run metrics engine after ingestion: {e}')
 
         duration_ms = (time.perf_counter() - start_time) * 1000
 

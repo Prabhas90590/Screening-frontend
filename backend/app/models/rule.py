@@ -33,6 +33,8 @@ class RuleVersionRecord(BaseModel):
     description: Optional[str] = Field(None, description="Profile description or thesis")
     sector_limits: Dict[str, float] = Field(default_factory=dict, description="Sector debt limits")
     diversification_rules: Dict[str, Any] = Field(default_factory=dict, description="Cap rules")
+    changes: List[str] = Field(default_factory=list, description="Diff comparison from previous version")
+    selected_countries: List[str] = Field(default_factory=list, description="Selected country names")
     rules: List[RuleRecord] = Field(default_factory=list, description="Rules inside this profile")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

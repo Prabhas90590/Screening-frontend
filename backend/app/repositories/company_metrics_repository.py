@@ -176,6 +176,90 @@ class CompanyMetricsRepository:
         finally:
             conn.close()
 
+    def update_calculated_metrics(
+        self,
+        canonical_company_id: str,
+        avg_daily_traded_value: Optional[float],
+        pe_vs_benchmark: Optional[float],
+        peg_ratio: Optional[float],
+        ev_ebitda: Optional[float],
+        price_to_sales: Optional[float],
+        price_to_cash_flow: Optional[float],
+        net_debt: Optional[float],
+        net_debt_ebitda: Optional[float],
+        revenue_growth_fwd: Optional[float],
+        data_confidence: str,
+        updated_at: datetime,
+    ) -> None:
+        """Update only the Phase 10 derived/calculated metric columns for a company.
+
+        Phase 9 (ingestion) writes raw vendor financials.
+        Phase 10 (metrics engine) calls this to write computed ratios back.
+        Raw fields (revenue, ebitda, total_debt, cash, etc.) are NOT overwritten.
+        """
+        conn = db_manager.get_connection()
+        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
+
+        update_sql = """
+            UPDATE company_metrics SET
+                avg_daily_traded_value = %s,
+                pe_vs_benchmark        = %s,
+                peg_ratio              = %s,
+                ev_ebitda              = %s,
+                price_to_sales         = %s,
+                price_to_cash_flow     = %s,
+                net_debt               = %s,
+                net_debt_ebitda        = %s,
+                revenue_growth_fwd     = %s,
+                data_confidence        = %s,
+                updated_at             = %s
+            WHERE canonical_company_id = %s
+        """ if is_postgres else """
+            UPDATE company_metrics SET
+                avg_daily_traded_value = ?,
+                pe_vs_benchmark        = ?,
+                peg_ratio              = ?,
+                ev_ebitda              = ?,
+                price_to_sales         = ?,
+                price_to_cash_flow     = ?,
+                net_debt               = ?,
+                net_debt_ebitda        = ?,
+                revenue_growth_fwd     = ?,
+                data_confidence        = ?,
+                updated_at             = ?
+            WHERE canonical_company_id = ?
+        """
+
+        updated_at_val = updated_at if is_postgres else updated_at.isoformat()
+
+        values = (
+            avg_daily_traded_value,
+            pe_vs_benchmark,
+            peg_ratio,
+            ev_ebitda,
+            price_to_sales,
+            price_to_cash_flow,
+            net_debt,
+            net_debt_ebitda,
+            revenue_growth_fwd,
+            data_confidence,
+            updated_at_val,
+            canonical_company_id,
+        )
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute(update_sql, values)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(
+                f"Failed to update calculated metrics for '{canonical_company_id}': {e}"
+            )
+            raise
+        finally:
+            conn.close()
+
     def list_metrics(self, limit: int = 100) -> List[CompanyMetricsRecord]:
         """List metrics for all companies ordered by market cap descending."""
         conn = db_manager.get_connection()

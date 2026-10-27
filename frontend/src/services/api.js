@@ -127,3 +127,31 @@ export async function initiateScreening(payload) {
   }
 }
 
+
+/**
+ * Fetch detailed screening results for a specific run from the database.
+ */
+export async function fetchScreeningResults(runId, view = 'all') {
+  try {
+    const res = await fetch(`${API_BASE}/screenings/${encodeURIComponent(runId)}/results?view=${encodeURIComponent(view)}&limit=100`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch run results`);
+    return await res.json();
+  } catch (err) {
+    console.warn(`[API] Could not fetch results for ${runId}:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Fetch delta comparison between two runs from the backend.
+ */
+export async function fetchRunComparison(runId, prevRunId) {
+  try {
+    const res = await fetch(`${API_BASE}/screenings/${encodeURIComponent(runId)}/compare/${encodeURIComponent(prevRunId)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch run comparison`);
+    return await res.json();
+  } catch (err) {
+    console.warn(`[API] Could not fetch run comparison:`, err.message);
+    return null;
+  }
+}

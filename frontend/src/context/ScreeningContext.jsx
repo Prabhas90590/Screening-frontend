@@ -10,6 +10,7 @@ import {
   INITIAL_SCHEDULE,
   INITIAL_SECTOR_LIMITS,
   INITIAL_SECURITIES,
+  MOCK_SECURITIES_BY_RUN,
 } from '../data/mockData';
 import {
   fetchProfiles as fetchProfilesApi,
@@ -17,6 +18,9 @@ import {
   updateProfile as updateProfileApi,
   activateProfile as activateProfileApi,
   deleteProfile as deleteProfileApi,
+  fetchScreeningResults,
+  fetchRunComparison,
+  initiateScreening,
 } from '../services/api';
 
 const ScreeningContext = createContext(null);
@@ -27,10 +31,14 @@ function reconstructSnapshotFromBackend(bp) {
     if (r.name) rulesMap.set(r.name.toLowerCase(), r);
     if (r.metric_name) rulesMap.set(r.metric_name.toLowerCase(), r);
     if (r.id) rulesMap.set(r.id.toLowerCase(), r);
+    const normalizedKey = (r.name || r.metric_name || r.id || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    if (normalizedKey) rulesMap.set(normalizedKey, r);
   });
 
   const metrics = INITIAL_RULE_METRICS.map((metric) => {
-    const matched = rulesMap.get(metric.name.toLowerCase());
+    const rawKey = metric.name.toLowerCase();
+    const normalizedKey = rawKey.replace(/[^a-z0-9]+/g, '');
+    const matched = rulesMap.get(rawKey) || rulesMap.get(normalizedKey);
     if (matched) {
       return {
         ...metric,
@@ -40,7 +48,7 @@ function reconstructSnapshotFromBackend(bp) {
         weight: matched.weight !== undefined ? matched.weight : 0,
       };
     }
-    return { ...metric };
+    return { ...metric, mode: 'Off', condition: '', value: '', weight: 0 };
   });
 
   const sectorLimitsMap = bp.sector_limits || {};
@@ -51,14 +59,167 @@ function reconstructSnapshotFromBackend(bp) {
     return { ...sl };
   });
 
+  const selectedCountryList = Array.isArray(bp.selected_countries) ? bp.selected_countries : [];
+  const selectedCountrySet = new Set(selectedCountryList.map((c) => String(c).toLowerCase().trim()));
+  const countries = INITIAL_COUNTRIES.map((c) => ({
+    ...c,
+    selected: selectedCountrySet.size > 0
+      ? selectedCountrySet.has(c.name.toLowerCase().trim()) || selectedCountrySet.has(c.id.toLowerCase().trim())
+      : c.selected,
+  }));
+
   return {
     metrics,
     sectorLimits,
-    countries: INITIAL_COUNTRIES.map((c) => ({ ...c })),
+    countries,
     exchanges: INITIAL_EXCHANGES.map((e) => ({ ...e })),
     sectors: INITIAL_SECTORS.map((s) => ({ ...s })),
     diversification: { ...INITIAL_DIVERSIFICATION },
   };
+}
+
+export function computeProfileVersionDiff(newSnapshot, prevSnapshot) {
+  if (!prevSnapshot) {
+    const activeRules = (newSnapshot?.metrics || []).filter((m) => m.mode !== 'Off' && m.value !== '');
+    const selectedCountries = (newSnapshot?.countries || []).filter((c) => c.selected);
+    const countryInfo = selectedCountries.length > 0 ? `, ${selectedCountries.length} countries` : '';
+    return [
+      `Initial profile created with ${activeRules.length} active rules${countryInfo}`,
+    ];
+  }
+
+  const diffs = [];
+  const prevMetricsMap = new Map();
+  (prevSnapshot.metrics || []).forEach((m) => {
+    prevMetricsMap.set(m.name.toLowerCase(), m);
+  });
+
+  // 1. Compare screening metrics
+  (newSnapshot.metrics || []).forEach((curr) => {
+    const prev = prevMetricsMap.get(curr.name.toLowerCase());
+    if (!prev) {
+      if (curr.mode !== 'Off') {
+        diffs.push(`Added rule ${curr.name}: ${curr.mode}, ${curr.condition} ${curr.value}`);
+      }
+      return;
+    }
+
+    const prevMode = prev.mode || 'Off';
+    const currMode = curr.mode || 'Off';
+    const prevCond = prev.condition || '';
+    const currCond = curr.condition || '';
+    const prevVal = String(prev.value ?? '').trim();
+    const currVal = String(curr.value ?? '').trim();
+    const prevWeight = Number(prev.weight) || 0;
+    const currWeight = Number(curr.weight) || 0;
+
+    // Disabled from active
+    if (prevMode !== 'Off' && currMode === 'Off') {
+      diffs.push(`${curr.name}: Disabled (was ${prevMode}, ${prevCond} ${prevVal})`);
+      return;
+    }
+
+    // Enabled from Off
+    if (prevMode === 'Off' && currMode !== 'Off') {
+      diffs.push(`${curr.name}: Enabled (${currMode}, ${currCond} ${currVal}${currWeight > 0 ? `, weight: ${currWeight}%` : ''})`);
+      return;
+    }
+
+    // Both active: compare details
+    if (currMode !== 'Off') {
+      const parts = [];
+      if (prevMode !== currMode) {
+        parts.push(`Mode: ${currMode} (was ${prevMode})`);
+      }
+      if (prevCond !== currCond || prevVal !== currVal) {
+        parts.push(`Threshold: ${currCond} ${currVal} (was ${prevCond} ${prevVal})`);
+      }
+      if (prevWeight !== currWeight && (currMode === 'Score' || currMode === 'Both')) {
+        parts.push(`Weight: ${currWeight}% (was ${prevWeight}%)`);
+      }
+      if (parts.length > 0) {
+        diffs.push(`${curr.name}: ${parts.join(', ')}`);
+      }
+    }
+  });
+
+  // Check metrics removed from list
+  const currMetricsMap = new Map((newSnapshot.metrics || []).map((m) => [m.name.toLowerCase(), m]));
+  (prevSnapshot.metrics || []).forEach((prev) => {
+    if (!currMetricsMap.has(prev.name.toLowerCase()) && prev.mode !== 'Off') {
+      diffs.push(`Removed rule: ${prev.name}`);
+    }
+  });
+
+  // 2. Compare Sector Debt Limits
+  const prevSectorLimitsMap = new Map((prevSnapshot.sectorLimits || []).map((s) => [s.sector, s]));
+  (newSnapshot.sectorLimits || []).forEach((currSl) => {
+    const prevSl = prevSectorLimitsMap.get(currSl.sector);
+    const currLimit = String(currSl.limit ?? '').trim();
+    const prevLimit = String(prevSl?.limit ?? '').trim();
+    if (currLimit !== prevLimit) {
+      if (currLimit && !prevLimit) {
+        diffs.push(`${currSl.sector} Debt Limit: Set to ${currLimit}x`);
+      } else if (!currLimit && prevLimit) {
+        diffs.push(`${currSl.sector} Debt Limit: Removed (was ${prevLimit}x)`);
+      } else if (currLimit && prevLimit) {
+        diffs.push(`${currSl.sector} Debt Limit: Changed to ${currLimit}x (was ${prevLimit}x)`);
+      }
+    }
+  });
+
+  // 3. Compare Diversification Constraints
+  const prevDiv = prevSnapshot.diversification || {};
+  const currDiv = newSnapshot.diversification || {};
+  const divFields = [
+    { key: 'maxNamesPerSector', label: 'Max stocks per sector' },
+    { key: 'maxNamesPerCountry', label: 'Max stocks per country' },
+    { key: 'minNonUsNamesPct', label: 'Min Non-US weight %' },
+    { key: 'minSmallMidCapNames', label: 'Min Small/Mid cap stocks' },
+  ];
+  divFields.forEach(({ key, label }) => {
+    const currVal = String(currDiv[key] ?? '').trim();
+    const prevVal = String(prevDiv[key] ?? '').trim();
+    if (currVal !== prevVal) {
+      if (currVal && !prevVal) {
+        diffs.push(`${label}: Set to ${currVal}`);
+      } else if (!currVal && prevVal) {
+        diffs.push(`${label}: Removed (was ${prevVal})`);
+      } else if (currVal && prevVal) {
+        diffs.push(`${label}: Changed to ${currVal} (was ${prevVal})`);
+      }
+    }
+  });
+
+  // 4. Compare Universe Countries
+  const prevCountries = new Set(
+    (prevSnapshot.countries || []).filter((c) => c.selected).map((c) => c.name)
+  );
+  const currCountries = new Set(
+    (newSnapshot.countries || []).filter((c) => c.selected).map((c) => c.name)
+  );
+
+  const addedCountries = [...currCountries].filter((c) => !prevCountries.has(c));
+  const removedCountries = [...prevCountries].filter((c) => !currCountries.has(c));
+
+  addedCountries.forEach((c) => diffs.push(`Added country: ${c}`));
+  removedCountries.forEach((c) => diffs.push(`Removed country: ${c}`));
+
+  // 5. Compare Universe Exchanges
+  const prevExchanges = new Set(
+    (prevSnapshot.exchanges || []).filter((e) => e.selected).map((e) => e.name)
+  );
+  const currExchanges = new Set(
+    (newSnapshot.exchanges || []).filter((e) => e.selected).map((e) => e.name)
+  );
+
+  const addedExchanges = [...currExchanges].filter((e) => !prevExchanges.has(e));
+  const removedExchanges = [...prevExchanges].filter((e) => !currExchanges.has(e));
+
+  addedExchanges.forEach((e) => diffs.push(`Added exchange: ${e}`));
+  removedExchanges.forEach((e) => diffs.push(`Removed exchange: ${e}`));
+
+  return diffs.length > 0 ? diffs : ['No criteria modifications detected compared to previous version'];
 }
 
 function mapBackendProfilesToFrontend(backendProfiles) {
@@ -70,6 +231,15 @@ function mapBackendProfilesToFrontend(backendProfiles) {
     const versionNumber = parseInt(String(bp.version_number).replace(/\D/g, '')) || 1;
     const versionStr = `v${versionNumber}`;
     const snapshot = bp.diversification_rules?.snapshot || reconstructSnapshotFromBackend(bp);
+    const changes = bp.changes || bp.diversification_rules?.changes || [];
+    const selectedCountries = bp.selected_countries?.length > 0
+      ? bp.selected_countries
+      : (snapshot.countries || []).filter((c) => c.selected).map((c) => c.name);
+    const changeSummary = changes.length > 0
+      ? (versionNumber === 1
+          ? changes[0]
+          : `${changes.length} change${changes.length === 1 ? '' : 's'} compared to v${versionNumber - 1}`)
+      : `Saved screening rules (${versionStr})`;
 
     const profileItem = {
       id: bp.version_id,
@@ -79,6 +249,8 @@ function mapBackendProfilesToFrontend(backendProfiles) {
       description: bp.description || `Saved screening rules (${versionStr})`,
       version: versionStr,
       versionNumber,
+      changes,
+      selectedCountries,
       snapshot,
     };
     parsedProfiles.push(profileItem);
@@ -94,9 +266,10 @@ function mapBackendProfilesToFrontend(backendProfiles) {
         : 'Saved',
       by: 'PM',
       name: bp.profile_name,
-      changeSummary: `${bp.rules?.length || 0} active rules configured in profile`,
+      changeSummary,
       resultImpact: '-',
-      changes: (bp.rules || []).map((r) => `${r.name || r.metric_name}: ${r.condition || ''} ${r.value ?? r.threshold_value ?? ''}`.trim()),
+      changes,
+      selectedCountries,
       snapshot,
     };
     parsedHistory.push(historyItem);
@@ -105,11 +278,64 @@ function mapBackendProfilesToFrontend(backendProfiles) {
   return { parsedProfiles, parsedHistory };
 }
 
+const createDefaultRuleMetrics = () =>
+  INITIAL_RULE_METRICS.map((metric) => ({
+    ...metric,
+    mode: 'Off',
+    condition: '',
+    value: '',
+    weight: 0,
+  }));
+
+const CANONICAL_METRIC_IDS = {
+  'Price (USD-equiv.)': 'price_usd',
+  'Market cap (USD)': 'market_cap',
+  'Avg daily volume (shares)': 'avg_volume',
+  'Avg daily traded value (USD)': 'avg_traded_value',
+  'Price / sales': 'price_to_sales',
+  'Forward P/E vs S&P 500': 'pe_vs_benchmark',
+  'Forward P/E': 'forward_pe',
+  'PEG': 'peg',
+  'EV / EBITDA': 'ev_ebitda',
+  'Price / cash flow': 'price_to_cash_flow',
+  'Revenue growth (5y, fwd)': 'revenue_growth_fwd',
+  'EPS growth (5y, fwd)': 'eps_growth_fwd',
+  'Beta': 'beta',
+  'Net debt / EBITDA': 'net_debt_ebitda',
+  'Dividend yield': 'dividend_yield',
+  'Data confidence': 'data_confidence',
+  '3y / 5y return': 'return_3y_5y',
+};
+
+const parseProfileRuleValue = (val) => {
+  if (val === '' || val === undefined || val === null) return null;
+  const str = String(val).replace(/[$,x%]/g, '').trim().toLowerCase();
+  if (str === 'high') return 3.0;
+  if (str === 'medium' || str === 'med') return 2.0;
+  if (str === 'low') return 1.0;
+  if (str.endsWith('b')) {
+    const n = parseFloat(str.slice(0, -1));
+    return isNaN(n) ? null : n * 1_000_000_000;
+  }
+  if (str.endsWith('m')) {
+    const n = parseFloat(str.slice(0, -1));
+    return isNaN(n) ? null : n * 1_000_000;
+  }
+  if (str.endsWith('k')) {
+    const n = parseFloat(str.slice(0, -1));
+    return isNaN(n) ? null : n * 1_000;
+  }
+  const n = parseFloat(str);
+  return isNaN(n) ? null : n;
+};
+
 export const ScreeningProvider = ({ children }) => {
   const [activeNav, setActiveNav] = useState('rules'); // 'rules' | 'results' | 'schedule'
   const [rulesTab, setRulesTab] = useState('profiles'); // 'configuration' | 'profiles'
-  const [resultsTab, setResultsTab] = useState('top20'); // 'top20' | 'rankNearMisses' | 'ruleNearMisses' | 'myHoldings' | 'allScreened'
-  const [selectedProfileName, setSelectedProfileName] = useState('');
+  const [resultsTab, setResultsTab] = useState('top20'); // 'top20' | 'changes' | 'nearMisses' | 'myHoldings'
+  const [changesSubTab, setChangesSubTab] = useState('all'); // 'all' | 'entered' | 'exited'
+  const [nearMissSubTab, setNearMissSubTab] = useState('all'); // 'all' | 'rank' | 'rule'
+  const [selectedProfileName, setSelectedProfileName] = useState('No active profile');
   const [draftProfileName, setDraftProfileName] = useState('');
 
   const [securities, setSecurities] = useState(INITIAL_SECURITIES);
@@ -123,6 +349,72 @@ export const ScreeningProvider = ({ children }) => {
   const [funnelState, setFunnelState] = useState(INITIAL_FUNNEL);
   const [scheduleConfig, setScheduleConfig] = useState(INITIAL_SCHEDULE);
   const [runHistory, setRunHistory] = useState(INITIAL_RUN_HISTORY);
+  const [selectedRunId, setSelectedRunId] = useState('run-005');
+  const [compareRunId, setCompareRunId] = useState('run-004');
+  const [backendRunComparison, setBackendRunComparison] = useState(null);
+
+  // Dual-mode run results loader: PostgreSQL Backend first, Mock fallback
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadResults() {
+      // 1. Attempt to fetch real database results from FastAPI / PostgreSQL
+      try {
+        const realResults = await fetchScreeningResults(selectedRunId);
+        if (isMounted && Array.isArray(realResults) && realResults.length > 0) {
+          const mapped = realResults.map((r) => ({
+            id: r.canonical_company_id || r.id,
+            rank: r.rank,
+            name: r.company_name,
+            ticker: r.ticker,
+            country: r.country,
+            exchange: r.exchange,
+            sector: r.sector,
+            score: r.score,
+            displayPrice: r.display_price,
+            fwdPe: r.fwd_pe,
+            peg: r.peg,
+            evEbitda: r.ev_ebitda,
+            beta: r.beta,
+            ndEbitda: r.nd_ebitda,
+            yieldPct: r.yield_pct,
+            epsGrowthPct: r.eps_growth_pct,
+            dataConfidence: r.data_confidence || 'High',
+            deltaStatus: r.stage_status === 'passed' ? 'retained' : 'exited',
+            movementReason: r.near_miss_status !== 'none' ? r.near_miss_status : '',
+            scoreBreakdown: r.score_breakdown || [],
+            metricStatuses: r.metric_statuses || {},
+          }));
+          setSecurities(mapped);
+          return;
+        }
+      } catch (err) {
+        // Backend not ready or table empty, proceed to mock
+      }
+
+      // 2. Fall back to rich mock data for selected run
+      if (isMounted && selectedRunId && MOCK_SECURITIES_BY_RUN && MOCK_SECURITIES_BY_RUN[selectedRunId]) {
+        setSecurities(MOCK_SECURITIES_BY_RUN[selectedRunId]);
+      }
+    }
+
+    loadResults();
+
+    // 3. Attempt to fetch real backend comparison if compareRunId is set
+    if (compareRunId && compareRunId !== 'none') {
+      fetchRunComparison(selectedRunId, compareRunId)
+        .then((comp) => {
+          if (isMounted && comp && comp.rule_diffs) {
+            setBackendRunComparison(comp);
+          }
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedRunId, compareRunId]);
 
   // Persistent workspace states across browser refreshes
   const [sectorLimits, setSectorLimits] = useState(() => {
@@ -170,20 +462,17 @@ export const ScreeningProvider = ({ children }) => {
     }
   });
 
-  const [ruleMetrics, setRuleMetrics] = useState(() => {
-    try {
-      const cached = localStorage.getItem('screening_active_rule_metrics');
-      return cached ? JSON.parse(cached) : INITIAL_RULE_METRICS;
-    } catch {
-      return INITIAL_RULE_METRICS;
-    }
-  });
+  const [ruleMetrics, setRuleMetrics] = useState(createDefaultRuleMetrics);
 
   // Profiles and Version History with instant LocalStorage hydration & Backend sync
   const [profiles, setProfiles] = useState(() => {
     try {
       const cached = localStorage.getItem('screening_profiles_cache');
-      return cached ? JSON.parse(cached) : [];
+      if (!cached) return [];
+      const parsed = JSON.parse(cached);
+      return Array.isArray(parsed)
+        ? parsed.filter((p) => p && p.name && p.id !== '1' && p.id !== '2' && p.id !== '3' && p.id !== '4')
+        : [];
     } catch {
       return [];
     }
@@ -192,7 +481,11 @@ export const ScreeningProvider = ({ children }) => {
   const [versionHistory, setVersionHistory] = useState(() => {
     try {
       const cached = localStorage.getItem('screening_history_cache');
-      return cached ? JSON.parse(cached) : [];
+      if (!cached) return [];
+      const parsed = JSON.parse(cached);
+      return Array.isArray(parsed)
+        ? parsed.filter((v) => v && v.name && v.id !== '1' && v.id !== '2' && v.id !== '3' && v.id !== '4')
+        : [];
     } catch {
       return [];
     }
@@ -204,12 +497,16 @@ export const ScreeningProvider = ({ children }) => {
   const selectedSecurity = securities.find((s) => s.id === selectedSecurityId) || null;
   const selectedSectorNames = sectors.filter((sector) => sector.selected).map((sector) => sector.name);
 
-  // Sync workspace state to localStorage on every change
+  // Sync workspace rule state to localStorage only when actively editing a version; otherwise clear it
   useEffect(() => {
     try {
-      localStorage.setItem('screening_active_rule_metrics', JSON.stringify(ruleMetrics));
+      if (editingVersion) {
+        localStorage.setItem('screening_active_rule_metrics', JSON.stringify(ruleMetrics));
+      } else {
+        localStorage.removeItem('screening_active_rule_metrics');
+      }
     } catch {}
-  }, [ruleMetrics]);
+  }, [ruleMetrics, editingVersion]);
 
   useEffect(() => {
     try {
@@ -241,29 +538,133 @@ export const ScreeningProvider = ({ children }) => {
     } catch {}
   }, [diversification]);
 
-  // Load authoritative profiles from PostgreSQL backend on mount
+  // Load authoritative profiles from PostgreSQL backend on mount, safely merging with local storage
   useEffect(() => {
     let isMounted = true;
 
     async function loadBackendProfiles() {
       try {
+        // Step 1: Read whatever is currently in local storage
+        let localProfiles = [];
+        try {
+          const cachedProfilesStr = localStorage.getItem('screening_profiles_cache');
+          if (cachedProfilesStr) {
+            const parsed = JSON.parse(cachedProfilesStr);
+            if (Array.isArray(parsed)) {
+              localProfiles = parsed.filter(
+                (p) => p && p.name && p.id !== '1' && p.id !== '2' && p.id !== '3' && p.id !== '4'
+              );
+            }
+          }
+        } catch {}
+
+        let localHistory = [];
+        try {
+          const cachedHistoryStr = localStorage.getItem('screening_history_cache');
+          if (cachedHistoryStr) {
+            const parsed = JSON.parse(cachedHistoryStr);
+            if (Array.isArray(parsed)) {
+              localHistory = parsed.filter(
+                (v) => v && v.name && v.id !== '1' && v.id !== '2' && v.id !== '3' && v.id !== '4'
+              );
+            }
+          }
+        } catch {}
+
+        // Step 2: Query PostgreSQL backend
         const backendProfiles = await fetchProfilesApi();
-        if (isMounted && backendProfiles && Array.isArray(backendProfiles) && backendProfiles.length > 0) {
-          const { parsedProfiles, parsedHistory } = mapBackendProfilesToFrontend(backendProfiles);
-          setProfiles(parsedProfiles);
-          setVersionHistory(parsedHistory);
+        if (!isMounted) return;
+
+        if (backendProfiles && Array.isArray(backendProfiles)) {
+          const realBackendProfiles = backendProfiles.filter(
+            (bp) => bp && bp.profile_name && bp.version_id !== '1' && bp.version_id !== '2'
+          );
+
+          const { parsedProfiles, parsedHistory } = mapBackendProfilesToFrontend(realBackendProfiles);
+
+          // Build index of backend IDs and profile keys
+          const backendIds = new Set(parsedProfiles.map((p) => p.id));
+          const backendProfileKeys = new Set(parsedProfiles.map((p) => p.profileKey));
+
+          // Keep any locally created profiles that are not yet in backend
+          const unsyncedProfiles = localProfiles.filter(
+            (lp) => !backendIds.has(lp.id) && !backendProfileKeys.has(lp.profileKey)
+          );
+          const unsyncedHistory = localHistory.filter(
+            (lh) => !backendIds.has(lh.id)
+          );
+
+          const combinedProfiles = [...parsedProfiles, ...unsyncedProfiles];
+          const combinedHistory = [...parsedHistory, ...unsyncedHistory];
+
+          if (combinedProfiles.length > 0 && !combinedProfiles.some((p) => p.badge === 'Active')) {
+            combinedProfiles[0].badge = 'Active';
+          }
+
+          setProfiles(combinedProfiles);
+          setVersionHistory(combinedHistory);
 
           try {
-            localStorage.setItem('screening_profiles_cache', JSON.stringify(parsedProfiles));
-            localStorage.setItem('screening_history_cache', JSON.stringify(parsedHistory));
+            localStorage.setItem('screening_profiles_cache', JSON.stringify(combinedProfiles));
+            localStorage.setItem('screening_history_cache', JSON.stringify(combinedHistory));
           } catch {}
 
-          const active = parsedProfiles.find((p) => p.badge === 'Active') || parsedProfiles[0];
-          if (active && active.snapshot) {
+          const active = combinedProfiles.find((p) => p.badge === 'Active') || combinedProfiles[0];
+          if (active) {
             setSelectedProfileName(`${active.name} - Version ${active.versionNumber}`);
-            const hasLocalEdits = localStorage.getItem('screening_active_rule_metrics');
-            if (!hasLocalEdits) {
-              loadConfiguration(active.snapshot, false);
+          }
+
+          // Step 3: Background auto-sync unsynced local profiles to backend if backend is available
+          if (unsyncedProfiles.length > 0) {
+            for (const unsynced of unsyncedProfiles) {
+              try {
+                const sectorLimitsMap = {};
+                (unsynced.snapshot?.sectorLimits || []).forEach((item) => {
+                  if (item.limit !== '' && !isNaN(parseFloat(item.limit))) {
+                    sectorLimitsMap[item.sector] = parseFloat(item.limit);
+                  }
+                });
+
+                const activeRules = (unsynced.snapshot?.metrics || [])
+                  .filter((m) => m.mode !== 'Off' && m.value !== '' && parseProfileRuleValue(m.value) !== null)
+                  .map((m) => ({
+                    id: CANONICAL_METRIC_IDS[m.name] || m.name.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+                    name: m.name,
+                    category: m.category || 'Valuation',
+                    mode: m.mode || 'Both',
+                    condition: m.condition || '>=',
+                    value: parseProfileRuleValue(m.value) || 0.0,
+                    value_display: `${m.condition || ''} ${m.value || ''}`.trim(),
+                    weight: m.mode === 'Off' || m.mode === 'Req.' ? 0.0 : (parseFloat(m.weight) || 0.0),
+                  }));
+
+                await createProfileApi({
+                  profile_name: unsynced.name,
+                  version_number: String(unsynced.versionNumber || 1),
+                  description: unsynced.description || `Saved screening rules (Version ${unsynced.versionNumber || 1})`,
+                  is_active: unsynced.badge === 'Active',
+                  sector_limits: sectorLimitsMap,
+                  diversification_rules: {
+                    ...unsynced.snapshot?.diversification,
+                    snapshot: unsynced.snapshot,
+                  },
+                  changes: unsynced.changes || [],
+                  rules: activeRules,
+                });
+              } catch (syncErr) {
+                console.warn('[ScreeningContext] Could not auto-sync local profile to backend:', unsynced.name, syncErr);
+              }
+            }
+          }
+        } else {
+          // Backend is offline or returned null/error
+          // Guarantee that local profiles and history are NEVER wiped!
+          if (localProfiles.length > 0) {
+            setProfiles(localProfiles);
+            setVersionHistory(localHistory);
+            const active = localProfiles.find((p) => p.badge === 'Active') || localProfiles[0];
+            if (active) {
+              setSelectedProfileName(`${active.name} - Version ${active.versionNumber}`);
             }
           }
         }
@@ -304,6 +705,10 @@ export const ScreeningProvider = ({ children }) => {
     setSectors((prev) =>
       prev.map((sector) => (sector.name === name ? { ...sector, selected: !sector.selected } : sector))
     );
+  };
+
+  const setAllSectors = (selected) => {
+    setSectors((prev) => prev.map((sector) => ({ ...sector, selected })));
   };
 
   const updateScheduleConfig = (updates) => {
@@ -361,7 +766,7 @@ export const ScreeningProvider = ({ children }) => {
     } catch {}
 
     if (navigateToCatalog) {
-      setRulesTab('catalog');
+      setRulesTab('configuration');
     }
   };
 
@@ -373,13 +778,6 @@ export const ScreeningProvider = ({ children }) => {
       } catch (err) {
         console.warn('[ScreeningContext] Backend activation sync skipped:', err);
       }
-
-      const version = versionHistory.find(
-        (item) =>
-          item.profileKey === target.profileKey &&
-          item.versionNumber === target.versionNumber
-      );
-      loadConfiguration(target.snapshot || version?.snapshot, false);
 
       setProfiles((prev) => {
         const updated = prev.map((profile) => ({
@@ -409,12 +807,18 @@ export const ScreeningProvider = ({ children }) => {
     }
   };
 
-  const restoreVersion = (version) => {
+  const restoreVersion = async (version) => {
     const target = versionHistory.find(
       (item) => item.id === version || item.version === version
     );
-    loadConfiguration(target?.snapshot, false);
     if (target) {
+      if (target.id && !target.id.includes('-v')) {
+        try {
+          await activateProfileApi(target.id);
+        } catch (err) {
+          console.warn('[ScreeningContext] Backend restore sync skipped:', err);
+        }
+      }
       setProfiles((prev) => {
         const updated = prev.map((profile) => ({
           ...profile,
@@ -431,18 +835,19 @@ export const ScreeningProvider = ({ children }) => {
         } catch {}
         return updated;
       });
-    }
-    setVersionHistory((prev) => {
-      const updated = prev.map((v) => ({
-        ...v,
-        isCurrent: v.id === version || v.version === version,
-      }));
-      try {
-        localStorage.setItem('screening_history_cache', JSON.stringify(updated));
-      } catch {}
-      return updated;
-    });
-    if (target) {
+      setVersionHistory((prev) => {
+        const updated = prev.map((v) => ({
+          ...v,
+          isCurrent: v.id === version || v.version === version,
+        }));
+        try {
+          localStorage.setItem('screening_history_cache', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+      if (target.snapshot) {
+        loadConfiguration(target.snapshot, false);
+      }
       setSelectedProfileName(`${target.name || 'Saved profile'} - Version ${target.versionNumber}`);
     }
   };
@@ -484,12 +889,47 @@ export const ScreeningProvider = ({ children }) => {
 
   const updateRuleMetric = (metricName, updates) => {
     setRuleMetrics((prev) =>
-      prev.map((metric) => (metric.name === metricName ? { ...metric, ...updates } : metric))
+      prev.map((metric) => {
+        if (metric.name !== metricName) return metric;
+        const next = { ...metric, ...updates };
+        // Mode & Weight validation:
+        // When mode is Off or Req (Gate only), weight is locked to 0
+        if (next.mode === 'Off' || next.mode === 'Req.') {
+          next.weight = 0;
+        } else if ((next.mode === 'Score' || next.mode === 'Both') && (next.weight === 0 || next.weight === undefined)) {
+          // When switching to Score or Both and weight was 0, default to 10
+          next.weight = 10;
+        }
+        return next;
+      })
     );
+  };
+
+  const autoBalanceWeights = () => {
+    setRuleMetrics((prev) => {
+      const scoringMetrics = prev.filter((m) => m.mode === 'Score' || m.mode === 'Both');
+      if (scoringMetrics.length === 0) return prev;
+      const currentTotal = scoringMetrics.reduce((sum, m) => sum + (Number(m.weight) || 0), 0);
+
+      return prev.map((m) => {
+        if (m.mode !== 'Score' && m.mode !== 'Both') {
+          return { ...m, weight: 0 };
+        }
+        let target;
+        if (currentTotal > 0) {
+          target = Math.round(((Number(m.weight) || 0) / currentTotal) * 100);
+        } else {
+          target = Math.round(100 / scoringMetrics.length);
+        }
+        return { ...m, weight: Math.min(100, Math.max(0, target)) };
+      });
+    });
   };
 
   const saveConfigurationAsNewVersion = async (name, configuration, profileKey = null, editedFromVersion = null) => {
     const trimmedName = name.trim();
+    if (!trimmedName) return { saved: false, error: 'Name is required' };
+
     const snapshot = configuration || {
       metrics: ruleMetrics.map((metric) => ({ ...metric })),
       sectorLimits: sectorLimits.map((item) => ({ ...item })),
@@ -498,18 +938,20 @@ export const ScreeningProvider = ({ children }) => {
       sectors: sectors.map((sector) => ({ ...sector })),
       diversification: { ...diversification },
     };
+
+    const cleanSlug = trimmedName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const existingProfile = profiles.find(
-      (profile) => profile.name.trim().toLowerCase() === trimmedName.toLowerCase()
+      (profile) => profile.name.trim().toLowerCase() === trimmedName.toLowerCase() || profile.profileKey === cleanSlug
     );
-    const nextProfileKey =
-      profileKey ||
-      existingProfile?.profileKey ||
-      `${trimmedName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`;
+    const nextProfileKey = profileKey || existingProfile?.profileKey || cleanSlug;
     const nextVersionNumber =
       Math.max(
         ...profiles
           .filter((profile) => profile.profileKey === nextProfileKey)
           .map((profile) => profile.versionNumber || 0),
+        ...versionHistory
+          .filter((item) => item.profileKey === nextProfileKey)
+          .map((item) => item.versionNumber || 0),
         0
       ) + 1;
     const version = `v${nextVersionNumber}`;
@@ -523,17 +965,44 @@ export const ScreeningProvider = ({ children }) => {
     });
 
     const activeRulesForBackend = (snapshot.metrics || [])
-      .filter((m) => m.mode !== 'Off' || m.value !== '' || m.condition !== '')
-      .map((m) => ({
-        id: m.name.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
-        name: m.name,
-        category: m.category || 'Valuation',
-        mode: m.mode || 'Both',
-        condition: m.condition || '>=',
-        value: parseFloat(m.value) || 0.0,
-        value_display: `${m.condition || ''} ${m.value || ''}`.trim(),
-        weight: parseFloat(m.weight) || 0.0,
-      }));
+      .filter((m) => m.mode !== 'Off' && m.value !== '' && parseProfileRuleValue(m.value) !== null)
+      .map((m) => {
+        const canonicalId = CANONICAL_METRIC_IDS[m.name] || m.name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        const numVal = parseProfileRuleValue(m.value) || 0.0;
+        return {
+          id: canonicalId,
+          name: m.name,
+          category: m.category || 'Valuation',
+          mode: m.mode || 'Both',
+          condition: m.condition || '>=',
+          value: numVal,
+          value_display: `${m.condition || ''} ${m.value || ''}`.trim(),
+          weight: m.mode === 'Off' || m.mode === 'Req.' ? 0.0 : (parseFloat(m.weight) || 0.0),
+        };
+      });
+
+    // Find previous snapshot to compute comparison changes from previous version
+    let prevSnapshot = null;
+    if (editedFromVersion) {
+      const match =
+        versionHistory.find((v) => v.profileKey === nextProfileKey && v.versionNumber === editedFromVersion) ||
+        profiles.find((p) => p.profileKey === nextProfileKey && p.versionNumber === editedFromVersion);
+      prevSnapshot = match?.snapshot || null;
+    } else {
+      const existingVersions = versionHistory
+        .filter((v) => v.profileKey === nextProfileKey)
+        .sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0));
+      prevSnapshot = existingVersions[0]?.snapshot || existingProfile?.snapshot || null;
+    }
+
+    const comparisonDiff = computeProfileVersionDiff(snapshot, prevSnapshot);
+    const changeSummaryText = prevSnapshot
+      ? `${comparisonDiff.length} change${comparisonDiff.length === 1 ? '' : 's'} compared to Version ${editedFromVersion || (nextVersionNumber - 1)}`
+      : `Initial profile created with ${activeRulesForBackend.length} active rules`;
+
+    const selectedCountries = (snapshot.countries || [])
+      .filter((c) => c.selected)
+      .map((c) => c.name);
 
     const backendPayload = {
       profile_name: trimmedName,
@@ -545,6 +1014,8 @@ export const ScreeningProvider = ({ children }) => {
         ...snapshot.diversification,
         snapshot,
       },
+      changes: comparisonDiff,
+      selected_countries: selectedCountries,
       rules: activeRulesForBackend,
     };
 
@@ -572,9 +1043,10 @@ export const ScreeningProvider = ({ children }) => {
       by: 'PM',
       name: trimmedName,
       editedFromVersion,
-      changeSummary: `${activeRulesForBackend.length} active rules configured in profile`,
+      changeSummary: changeSummaryText,
       resultImpact: '-',
-      changes: activeRulesForBackend.map((r) => `${r.name}: ${r.condition} ${r.value}`),
+      changes: comparisonDiff,
+      selectedCountries,
       snapshot,
     };
 
@@ -586,6 +1058,8 @@ export const ScreeningProvider = ({ children }) => {
       description: `Saved screening rules (Version ${nextVersionNumber})`,
       version,
       versionNumber: nextVersionNumber,
+      changes: comparisonDiff,
+      selectedCountries,
       snapshot,
     };
 
@@ -598,12 +1072,14 @@ export const ScreeningProvider = ({ children }) => {
     });
 
     setProfiles((prev) => {
+      // Remove any previous entry with the exact same version id if present
+      const remaining = prev.filter((p) => p.id !== backendVersionId);
       const updated = [
-        ...prev.map((profile) => ({
+        newProfileItem,
+        ...remaining.map((profile) => ({
           ...profile,
           badge: profile.badge === 'Active' ? 'Saved' : profile.badge,
         })),
-        newProfileItem,
       ];
       try {
         localStorage.setItem('screening_profiles_cache', JSON.stringify(updated));
@@ -669,10 +1145,15 @@ export const ScreeningProvider = ({ children }) => {
   };
 
   const beginVersionEdit = (versionId) => {
-    const target = versionHistory.find((item) => item.id === versionId || item.version === versionId);
-    if (!target?.snapshot) return;
+    const target =
+      versionHistory.find((item) => item.id === versionId || item.version === versionId) ||
+      profiles.find((item) => item.id === versionId || item.version === versionId);
+    if (!target?.snapshot) {
+      console.warn('[ScreeningContext] Could not find profile snapshot for versionId:', versionId);
+      return;
+    }
 
-    loadConfiguration(target.snapshot);
+    loadConfiguration(target.snapshot, true);
     setEditingVersion({
       id: target.id || target.version,
       name: target.name || 'Saved profile',
@@ -685,12 +1166,13 @@ export const ScreeningProvider = ({ children }) => {
   const saveAsNewVersion = (name) => saveConfigurationAsNewVersion(name);
 
   const discardChanges = () => {
-    setRuleMetrics(INITIAL_RULE_METRICS.map((metric) => ({ ...metric })));
+    setRuleMetrics(createDefaultRuleMetrics());
     setSectorLimits(INITIAL_SECTOR_LIMITS.map((item) => ({ ...item })));
     setSectors(INITIAL_SECTORS.map((sector) => ({ ...sector })));
     setCountries(INITIAL_COUNTRIES.map((country) => ({ ...country })));
     setExchanges(INITIAL_EXCHANGES.map((exchange) => ({ ...exchange })));
     setDiversification({ ...INITIAL_DIVERSIFICATION });
+    setEditingVersion(null);
 
     try {
       localStorage.removeItem('screening_active_rule_metrics');
@@ -727,10 +1209,15 @@ export const ScreeningProvider = ({ children }) => {
         searchQuery,
         setSearchQuery,
         funnelState,
+        setFunnelState,
         setSecurityDecision,
         scheduleConfig,
         updateScheduleConfig,
         runHistory,
+        selectedRunId,
+        setSelectedRunId,
+        compareRunId,
+        setCompareRunId,
         triggerRunNow,
         profiles,
         activateProfile,
@@ -744,6 +1231,7 @@ export const ScreeningProvider = ({ children }) => {
         updateSectorNote,
         ruleMetrics,
         updateRuleMetric,
+        autoBalanceWeights,
         saveAsNewVersion,
         saveConfigurationAsNewVersion,
         deleteVersion,
@@ -755,6 +1243,7 @@ export const ScreeningProvider = ({ children }) => {
         exchanges,
         toggleExchange,
         toggleSector,
+        setAllSectors,
         diversification,
         updateDiversification,
       }}

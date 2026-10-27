@@ -50,47 +50,12 @@ def _record_to_schema(version: RuleVersionRecord) -> RuleProfileSchema:
         description=version.description,
         sector_limits=version.sector_limits,
         diversification_rules=version.diversification_rules,
+        changes=version.changes or [],
+        selected_countries=version.selected_countries or [],
         rules=rule_items,
         created_at=version.created_at,
         updated_at=version.updated_at,
     )
-
-
-def _seed_default_profile_if_empty() -> None:
-    """Seed a default 'Conservative Value' profile if DB is completely empty."""
-    existing = rule_repository.list_versions()
-    if not existing:
-        now = datetime.now(timezone.utc)
-        default_version = RuleVersionRecord(
-            version_id="prof-conservative-v1",
-            profile_name="Conservative Value",
-            version_number="1.0",
-            is_active=True,
-            description="Focuses on profitable cash generative firms with leverage below 3.0x",
-            sector_limits={"Information Technology": 3.0, "Energy": 3.5, "Health Care": 3.0},
-            diversification_rules={"max_sector_weight": 25.0},
-            created_at=now,
-            updated_at=now,
-        )
-        rule_repository.save_version(default_version)
-
-        # Seed standard default rules
-        for spec in STANDARD_RULE_CATALOG:
-            rule_repository.save_rule(
-                RuleRecord(
-                    rule_id=f"rule-{default_version.version_id}-{spec.id}",
-                    version_id=default_version.version_id,
-                    metric_name=spec.id,
-                    label=spec.name,
-                    category=spec.category,
-                    condition=spec.default_condition,
-                    threshold_value=spec.default_value,
-                    threshold_display=spec.default_display,
-                    mode="Both" if spec.default_weight > 0 else "Req.",
-                    weight=spec.default_weight,
-                    created_at=now,
-                )
-            )
 
 
 @router.get("/catalog", response_model=List[MetricCatalogSpecification])
@@ -102,7 +67,6 @@ def get_rule_catalog():
 @router.get("/profiles", response_model=List[RuleProfileSchema])
 def list_profiles():
     """Retrieve all saved screening strategy profiles from PostgreSQL."""
-    _seed_default_profile_if_empty()
     versions = rule_repository.list_versions()
     return [_record_to_schema(v) for v in versions]
 
@@ -110,7 +74,6 @@ def list_profiles():
 @router.get("/profiles/active", response_model=RuleProfileSchema)
 def get_active_profile():
     """Retrieve the currently active screening profile."""
-    _seed_default_profile_if_empty()
     active = rule_repository.get_active_version()
     if not active:
         raise HTTPException(
@@ -138,6 +101,49 @@ def create_profile(request: CreateProfileRequest):
     now = datetime.now(timezone.utc)
     version_id = f"prof-{uuid4().hex[:8]}"
 
+    changes = list(request.changes or [])
+    if not changes:
+        all_versions = rule_repository.list_versions()
+        matching_prev = [v for v in all_versions if v.profile_name.lower().strip() == request.profile_name.lower().strip()]
+        if matching_prev:
+            prev_ver = matching_prev[0]
+            prev_rules = {r.metric_name: r for r in prev_ver.rules}
+            curr_rules = {r.id: r for r in request.rules}
+            diffs = []
+            for m_id, curr_r in curr_rules.items():
+                if m_id in prev_rules:
+                    prev_r = prev_rules[m_id]
+                    parts = []
+                    if prev_r.mode != curr_r.mode:
+                        parts.append(f"Mode: {curr_r.mode} (was {prev_r.mode})")
+                    if prev_r.condition != curr_r.condition or prev_r.threshold_value != curr_r.value:
+                        parts.append(f"Threshold: {curr_r.condition} {curr_r.value} (was {prev_r.condition} {prev_r.threshold_value})")
+                    if prev_r.weight != curr_r.weight and curr_r.mode in ("Score", "Both"):
+                        parts.append(f"Weight: {curr_r.weight}% (was {prev_r.weight}%)")
+                    if parts:
+                        diffs.append(f"{curr_r.name}: {', '.join(parts)}")
+                else:
+                    if curr_r.mode != "Off":
+                        diffs.append(f"Added rule {curr_r.name}: {curr_r.mode}, {curr_r.condition} {curr_r.value}")
+            for m_id, prev_r in prev_rules.items():
+                if m_id not in curr_rules and prev_r.mode != "Off":
+                    diffs.append(f"Removed rule: {prev_r.label}")
+
+            # Check country differences
+            prev_countries = set(prev_ver.selected_countries or [])
+            curr_countries = set(request.selected_countries or [])
+            added_countries = curr_countries - prev_countries
+            removed_countries = prev_countries - curr_countries
+            for c in sorted(added_countries):
+                diffs.append(f"Added country: {c}")
+            for c in sorted(removed_countries):
+                diffs.append(f"Removed country: {c}")
+
+            changes = diffs if diffs else ["No threshold changes compared to previous version."]
+        else:
+            active_count = sum(1 for r in request.rules if r.mode != "Off")
+            changes = [f"Initial profile created with {active_count} active rules."]
+
     version_record = RuleVersionRecord(
         version_id=version_id,
         profile_name=request.profile_name,
@@ -146,6 +152,8 @@ def create_profile(request: CreateProfileRequest):
         description=request.description,
         sector_limits=request.sector_limits,
         diversification_rules=request.diversification_rules,
+        changes=changes,
+        selected_countries=request.selected_countries or [],
         created_at=now,
         updated_at=now,
     )
@@ -216,6 +224,8 @@ def update_profile(version_id: str, request: UpdateProfileRequest):
         description=request.description if request.description is not None else existing.description,
         sector_limits=request.sector_limits if request.sector_limits is not None else existing.sector_limits,
         diversification_rules=request.diversification_rules if request.diversification_rules is not None else existing.diversification_rules,
+        changes=request.changes if request.changes is not None else existing.changes,
+        selected_countries=request.selected_countries if request.selected_countries is not None else existing.selected_countries,
         created_at=existing.created_at,
         updated_at=now,
     )

@@ -6,7 +6,7 @@ import { ProfilesVersionHistory, VersionSaveActions } from './Profiles-version-h
 import { MarketUniverseSelector } from './MarketUniverseSelector';
 
 export const ScreeningRulesView = () => {
-  const { rulesTab, setRulesTab } = useScreening();
+  const { rulesTab, setRulesTab, editingVersion, discardChanges } = useScreening();
 
   return (
     <div className="mx-auto max-w-7xl space-y-4 p-4 font-sans text-slate-700">
@@ -31,6 +31,48 @@ export const ScreeningRulesView = () => {
 
       {(rulesTab === 'catalog' || rulesTab === 'limits' || rulesTab === 'configuration') && (
         <div className="space-y-4">
+          {editingVersion ? (
+            <div className="flex items-center justify-between rounded-lg border border-[#238c83]/40 bg-[#f1faf8] p-3 shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#147b73] text-white text-xs font-bold">
+                  ✎
+                </span>
+                <div>
+                  <p className="text-xs font-semibold text-slate-900">
+                    Editing Profile: <span className="font-bold text-[#147b73]">{editingVersion.name}</span> (Version {editingVersion.versionNumber})
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Showing rules loaded for this profile. Make adjustments below and click Save or Cancel Edit.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={discardChanges}
+                className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                Cancel Edit
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/80 p-3 text-xs text-slate-600">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-slate-600 text-xs font-bold">
+                  ℹ
+                </span>
+                <span>
+                  All rules are currently <strong>Off</strong> by default. Click <strong>Edit</strong> on a profile in the Profiles tab to load its configured rules, or customize rules below to create a new profile.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRulesTab('profiles')}
+                className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                Go to Profiles
+              </button>
+            </div>
+          )}
           <MarketUniverseSelector />
           <RuleCatalog />
           <LimitsUniverseDiversification />

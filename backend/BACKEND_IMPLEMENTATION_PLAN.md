@@ -631,7 +631,7 @@ ules: Versioned profile strategies and individual criteria gates.
    - **Company Metrics Population**: Writes fundamental building blocks (`ebitda`, `net_debt`, `revenue`, `market_cap_usd`) and preliminary multiples (`forward_pe`, `peg_ratio`, `beta`) to `company_metrics`.
    - **Funnel Progression Tracking**: Updates `funnel_counts` with live listing and company counts.
 
-   ## Phase 10: Metrics engine
+   ## Phase 10: Metrics engine (Completed)
 
    ### Purpose
 
@@ -652,7 +652,7 @@ ules: Versioned profile strategies and individual criteria gates.
    For every metric, store the input values, formula version, calculated value,
    calculation time, and any missing-data reason.
 
-   ## Phase 11: Versioned rule engine
+   ## Phase 11: Versioned rule engine (Completed)
 
    ### Purpose
 
