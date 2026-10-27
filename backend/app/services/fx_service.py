@@ -57,11 +57,13 @@ class FXService:
         effective_rates = provider_rates or self.get_cached_rates(date_key)
 
         if not effective_rates:
-            logger.provider_warn(
-                "FX",
-                f"No dynamic rates available for '{date_key}'. Using fallback baseline rates."
-            )
-            effective_rates = DEFAULT_FX_RATES_TO_USD
+            if date_key not in self._daily_cache:
+                logger.provider_warn(
+                    "FX",
+                    f"No dynamic rates available for '{date_key}'. Using fallback baseline rates."
+                )
+                self._daily_cache[date_key] = DEFAULT_FX_RATES_TO_USD
+            effective_rates = self._daily_cache.get(date_key, DEFAULT_FX_RATES_TO_USD)
 
         # Validate that required currencies exist in the rate table
         from_code = from_currency.upper()

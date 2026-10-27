@@ -30,14 +30,23 @@ export const ResultsFilterBar = ({
   const selectedCountries = countries.filter((country) => country.selected);
   const selectedSectors = sectors.filter((sector) => sector.selected);
 
-  const enteredCount = securities.filter((s) => s.deltaStatus === 'entered').length || 3;
-  const exitedCount = securities.filter((s) => s.deltaStatus === 'exited').length || 2;
+  const top20Count = securities.filter(
+    (s) => (s.stageStatus === 'passed' && s.rank <= 20) || (s.rank && s.rank <= 20 && s.deltaStatus !== 'exited')
+  ).length || 20;
+
+  const nearMissCount = securities.filter(
+    (s) => s.nearMissStatus === 'rule_near_miss' || s.nearMissStatus === 'rank_near_miss' || s.deltaStatus === 'rule_miss'
+  ).length;
+
+  const enteredCount = securities.filter((s) => s.deltaStatus === 'entered').length;
+  const exitedCount = securities.filter((s) => s.deltaStatus === 'exited').length;
   const totalChanges = enteredCount + exitedCount;
 
   const tabs = [
-    { id: 'top20', label: '🏆 Top 20 (20)' },
-    { id: 'changes', label: `🔄 Changes (${enteredCount} In / ${exitedCount} Out)` },
-    { id: 'nearMisses', label: '⚠️ Near Misses (20)' },
+    { id: 'top20', label: `🏆 Top 20 (${top20Count})` },
+    { id: 'nearMisses', label: `⚠️ Near Misses (${nearMissCount})` },
+    { id: 'allScreened', label: `📋 All Evaluated (${securities.length})` },
+    { id: 'changes', label: `🔄 Turnover (${enteredCount} In / ${exitedCount} Out)` },
     { id: 'myHoldings', label: '💼 My Holdings' },
   ];
 

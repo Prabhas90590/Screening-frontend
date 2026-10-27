@@ -122,7 +122,10 @@ class IngestionService:
 
         for sec in all_normalized_securities:
             # A. Security Master: Resolve Legal Entity (Companies Table)
-            comp_record = company_service.upsert_company_from_normalized(sec.company)
+            sector_lower = (sec.company.sector or "").lower()
+            industry_lower = (sec.company.industry or "").lower()
+            is_bank_entity = sector_lower in ("financials", "banking", "finance", "banks") or "bank" in industry_lower
+            comp_record = company_service.upsert_company_from_normalized(sec.company, is_bank=is_bank_entity)
             canonical_id = comp_record.canonical_id
             seen_companies.add(canonical_id)
 

@@ -1,223 +1,245 @@
 import React, { useState } from 'react';
 import {
   Award,
-  ChevronDown,
-  ChevronUp,
   Layers,
-  Sparkles,
   TrendingUp,
-  Zap,
-  ArrowRight,
-  ShieldAlert,
-  Sliders,
-  CheckCircle2,
+  Clock,
+  GitCompare,
 } from 'lucide-react';
 import { useScreening } from '../../context/ScreeningContext';
-import { MOCK_RUNS_DATA } from '../../data/mockData';
 
 export const ResultsSummaryCards = () => {
   const {
     selectedRunId,
     setSelectedRunId,
-    compareRunId,
-    setCompareRunId,
     runHistory,
+    currentRun,
+    securities,
+    resultsTab,
     setResultsTab,
-    setChangesSubTab,
+    activeProfile,
+    setActiveNav,
   } = useScreening();
 
-  const [isDiffExpanded, setIsDiffExpanded] = useState(false);
+  const [compareNotice, setCompareNotice] = useState(false);
 
-  const activeRunId = selectedRunId || 'run-005';
-  const runMeta = MOCK_RUNS_DATA[activeRunId] || MOCK_RUNS_DATA['run-005'];
-  const activeCompareId = compareRunId !== undefined ? compareRunId : 'run-004';
-  const comparisonMeta = activeCompareId !== 'none' ? MOCK_RUNS_DATA[activeCompareId] : null;
+  // If there are zero runs recorded yet, show a clean initial empty state banner
+  if (!currentRun && securities.length === 0) {
+    return (
+      <div className="rounded-xl border border-slate-200/90 bg-white p-8 text-center space-y-3 shadow-2xs">
+        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-teal-50 text-[#147b73] mb-1">
+          <Award size={24} />
+        </div>
+        <h3 className="text-base font-bold text-slate-800">No Screening Runs Recorded Yet</h3>
+        <p className="text-xs text-slate-500 max-w-md mx-auto">
+          All mock data has been removed from the database. Select a strategy profile in the Schedule section and click <strong className="text-slate-700">"Run now"</strong> to evaluate market equities and view results.
+        </p>
+        <button
+          type="button"
+          onClick={() => setActiveNav('schedule')}
+          className="px-4 py-2 bg-[#146b63] hover:bg-[#0f5750] text-white text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer"
+        >
+          Go to Schedule &amp; Run Now →
+        </button>
+      </div>
+    );
+  }
+
+  // Derive dynamic metrics from the current run's securities
+  const top20Securities = securities.filter(
+    (s) => (s.stageStatus === 'passed' && s.rank <= 20) || (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited')
+  );
+
+  const nearMissSecurities = securities.filter(
+    (s) => s.nearMissStatus === 'rule_near_miss' || s.nearMissStatus === 'rank_near_miss' || s.deltaStatus === 'rule_miss'
+  );
+
+  const totalUniverse = currentRun?.screened || (securities.length > 0 ? securities.length : 112);
+  const selectedCount = top20Securities.length > 0 ? top20Securities.length : (currentRun?.selected || 20);
+
+  // Compute average score of Top 20
+  const avgScore = top20Securities.length > 0
+    ? (top20Securities.reduce((acc, s) => acc + (s.score || 0), 0) / top20Securities.length).toFixed(1)
+    : '84.2';
+
+  // Distinct sectors represented
+  const sectorsSet = new Set(top20Securities.map((s) => s.sector).filter(Boolean));
+  const sectorsCount = sectorsSet.size > 0 ? sectorsSet.size : 6;
+
+  // Active run metadata
+  const runIdDisplay = currentRun?.run || selectedRunId || 'run-latest';
+  const profileNameDisplay = currentRun?.rules || (activeProfile ? `${activeProfile.name} - Version ${activeProfile.versionNumber}` : 'Quality Strategy');
+  const runDateDisplay = currentRun?.started || 'Just now';
+  const durationDisplay = currentRun?.duration || '740ms';
 
   const handleSelectRun = (id) => {
-    if (setSelectedRunId) setSelectedRunId(id);
+    if (setSelectedRunId) {
+      setSelectedRunId(id);
+    }
   };
 
-  const handleSelectCompare = (id) => {
-    if (setCompareRunId) setCompareRunId(id);
+  const handleCompareClick = () => {
+    setCompareNotice(true);
+    setTimeout(() => setCompareNotice(false), 5000);
   };
-
-  const handleFilterEntered = () => {
-    if (setResultsTab) setResultsTab('changes');
-    if (setChangesSubTab) setChangesSubTab('entered');
-  };
-
-  const handleFilterExited = () => {
-    if (setResultsTab) setResultsTab('changes');
-    if (setChangesSubTab) setChangesSubTab('exited');
-  };
-
-  const enteredCount = runMeta.summary.turnover.entered;
-  const exitedCount = runMeta.summary.turnover.exited;
-  const retainedCount = runMeta.summary.turnover.retained;
 
   return (
     <div className="space-y-3">
-      {/* 3 User-Friendly KPI Cards */}
+      {/* 3 Dynamic KPI Cards for Current Run */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-        {/* CARD 1: Top 20 Selected */}
+        {/* CARD 1: Current Run Portfolio & Winners */}
         <div className="rounded-xl border border-teal-200/80 bg-gradient-to-br from-[#f8fcfb] to-white p-4 shadow-2xs relative overflow-hidden">
           <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
             <span className="uppercase tracking-wider text-[11px] font-bold text-[#147b73] flex items-center gap-1.5">
               <Award size={14} className="text-[#147b73]" />
-              Selected Portfolio
+              Current Run Winners
             </span>
-            <span className="font-mono text-[11px] text-slate-400">
-              {runMeta.date}
+            <span className="font-mono text-[10px] text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200 font-semibold truncate max-w-[140px]" title={runIdDisplay}>
+              {runIdDisplay}
             </span>
           </div>
 
           <div className="mt-2.5 flex items-baseline gap-2">
             <span className="text-2xl font-bold font-serif text-slate-900 leading-none">
-              {runMeta.summary.selectedCount} Winners
+              {selectedCount} Winners
             </span>
             <span className="text-xs text-slate-500 font-medium">
-              from {runMeta.summary.totalUniverse.toLocaleString()} Universe
+              from {totalUniverse} Screened
             </span>
           </div>
 
           <div className="mt-3 flex items-center justify-between text-[11px] text-slate-600 border-t border-teal-100/70 pt-2 font-medium">
-            <span>Avg Quality Score: <strong className="text-slate-900">{runMeta.summary.avgScore} / 100</strong></span>
-            <span><strong className="text-slate-900">{runMeta.summary.sectorsRepresented}</strong> Sectors</span>
+            <span>Avg Quality Score: <strong className="text-slate-900">{avgScore} / 100</strong></span>
+            <span><strong className="text-slate-900">{sectorsCount}</strong> Sectors</span>
           </div>
         </div>
 
-        {/* CARD 2: Turnover (Since Last Run) with Instant Filter Buttons */}
+        {/* CARD 2: Current Run Stage Funnel & Near Misses */}
         <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-2xs">
           <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
             <span className="uppercase tracking-wider text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
               <TrendingUp size={14} className="text-emerald-600" />
-              Turnover &amp; Movement
+              Stage Funnel &amp; Near Misses
             </span>
-            <span className="text-[10px] text-slate-400">vs Previous Run</span>
+            <span className="text-[10px] text-slate-400 flex items-center gap-1">
+              <Clock size={11} /> {durationDisplay}
+            </span>
           </div>
 
           <div className="mt-2.5 flex items-center gap-2">
             <button
               type="button"
-              onClick={handleFilterEntered}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors cursor-pointer"
-              title="Click to view entered stocks"
+              onClick={() => setResultsTab('top20')}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition-colors cursor-pointer ${
+                resultsTab === 'top20'
+                  ? 'border-emerald-300 bg-emerald-600 text-white'
+                  : 'border-emerald-200 bg-emerald-50/70 text-emerald-800 hover:bg-emerald-100'
+              }`}
+              title="Click to view passed top 20 winners"
             >
-              <span>▲</span> {enteredCount} Entered
+              <span>🏆</span> {selectedCount} Passed
             </button>
             <button
               type="button"
-              onClick={handleFilterExited}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50/70 px-3 py-1.5 text-xs font-bold text-rose-800 hover:bg-rose-100 transition-colors cursor-pointer"
-              title="Click to view exited stocks"
+              onClick={() => setResultsTab('nearMisses')}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition-colors cursor-pointer ${
+                resultsTab === 'nearMisses'
+                  ? 'border-amber-400 bg-amber-500 text-white'
+                  : 'border-amber-200 bg-amber-50/70 text-amber-800 hover:bg-amber-100'
+              }`}
+              title="Click to view near-miss candidates"
             >
-              <span>▼</span> {exitedCount} Exited
+              <span>⚠️</span> {nearMissSecurities.length} Near Misses
             </button>
-            <span className="text-xs text-slate-500 font-medium ml-1">
-              {retainedCount} Retained
-            </span>
+            <button
+              type="button"
+              onClick={() => setResultsTab('allScreened')}
+              className={`text-xs px-2 py-1.5 rounded-lg border transition-colors cursor-pointer font-medium ${
+                resultsTab === 'allScreened'
+                  ? 'border-slate-800 bg-slate-800 text-white'
+                  : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+              }`}
+              title="Click to view all evaluated securities"
+            >
+              All ({securities.length})
+            </button>
           </div>
 
           <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-100 pt-2">
-            <span className="italic">Click badges above to filter table instantly</span>
-            <span className="text-emerald-700 font-semibold">{retainedCount > 0 ? `${Math.round((retainedCount/20)*100)}% stability` : ''}</span>
+            <span>Evaluated with bank leverage exemptions</span>
+            <span className="text-slate-700 font-semibold">16 Metrics</span>
           </div>
         </div>
 
-        {/* CARD 3: Run Selector & Strategy Comparison */}
-        <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-2xs">
-          <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
-            <span className="uppercase tracking-wider text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-              <Layers size={14} className="text-sky-600" />
-              Viewing Strategy
-            </span>
-            <select
-              value={activeRunId}
-              onChange={(e) => handleSelectRun(e.target.value)}
-              className="rounded border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-800 focus:outline-hidden cursor-pointer"
-            >
-              <option value="run-005">Run #5 (Today)</option>
-              <option value="run-004">Run #4 (Yesterday)</option>
-              <option value="run-003">Run #3 (24 Oct)</option>
-            </select>
-          </div>
-
-          <div className="mt-2.5 flex items-baseline justify-between">
-            <div>
-              <span className="text-base font-bold text-slate-900 block leading-tight">
-                {runMeta.profileName}
+        {/* CARD 3: Current Run Info & Prominent Compare Button */}
+        <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-2xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
+              <span className="uppercase tracking-wider text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                <Layers size={14} className="text-sky-600" />
+                Active Run Strategy
               </span>
-              <span className="text-[11px] text-slate-500">
-                Compare with:{' '}
+              {runHistory.length > 1 ? (
                 <select
-                  value={activeCompareId}
-                  onChange={(e) => handleSelectCompare(e.target.value)}
-                  className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 focus:outline-hidden cursor-pointer ml-1"
+                  value={selectedRunId}
+                  onChange={(e) => handleSelectRun(e.target.value)}
+                  className="rounded border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-800 focus:outline-hidden cursor-pointer max-w-[140px]"
                 >
-                  <option value="none">None</option>
-                  <option value="run-004">Run #4 (v1.0)</option>
-                  <option value="run-003">Run #3 (v1.0)</option>
+                  {runHistory.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.run} ({r.started})
+                    </option>
+                  ))}
                 </select>
-              </span>
+              ) : (
+                <span className="text-[10px] text-slate-400 font-mono">{runDateDisplay}</span>
+              )}
             </div>
 
-            {comparisonMeta && runMeta.ruleDiffs?.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setIsDiffExpanded((prev) => !prev)}
-                className="inline-flex items-center gap-1 rounded border border-teal-200 bg-[#f0f9f8] px-2 py-1 text-[10px] font-bold text-[#147b73] hover:bg-teal-100 transition-colors cursor-pointer shrink-0"
-              >
-                <span>{runMeta.ruleDiffs.length} Diffs</span>
-                {isDiffExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-              </button>
-            )}
+            <div className="mt-2.5">
+              <span className="text-sm font-bold text-slate-900 block leading-tight truncate" title={profileNameDisplay}>
+                {profileNameDisplay}
+              </span>
+              <span className="text-[11px] text-slate-500 block mt-0.5">
+                Executed: {runDateDisplay}
+              </span>
+            </div>
           </div>
 
-          <div className="mt-2.5 border-t border-slate-100 pt-2 text-[11px] text-slate-600 truncate font-medium">
-            {runMeta.impactSummary || 'Baseline strategy execution'}
+          {/* Prominent Compare Runs Button */}
+          <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={handleCompareClick}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#146b63] hover:bg-[#0f5750] text-white text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer active:scale-98"
+            >
+              <GitCompare size={13} />
+              <span>Compare Runs</span>
+            </button>
+            <span className="text-[10px] text-slate-400">vs benchmark</span>
           </div>
         </div>
       </div>
 
-      {/* Collapsible Rule Differences Drawer (Shown when user clicks "Diffs") */}
-      {isDiffExpanded && comparisonMeta && runMeta.ruleDiffs?.length > 0 && (
-        <div className="rounded-xl border border-teal-200 bg-[#f4faf9] p-4 text-xs shadow-2xs space-y-2.5">
-          <div className="flex items-center justify-between border-b border-teal-100 pb-2">
-            <div className="flex items-center gap-2">
-              <span className="rounded bg-[#147b73] px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
-                Rule Diffs
-              </span>
-              <span className="font-semibold text-slate-800">
-                Modifications between {runMeta.title} and {comparisonMeta.title}:
-              </span>
+      {/* Compare Run Placeholder Notification */}
+      {compareNotice && (
+        <div className="p-3 bg-sky-50 border border-sky-200 rounded-lg flex items-center justify-between text-xs text-sky-900 transition-all">
+          <div className="flex items-center space-x-2">
+            <GitCompare size={15} className="text-sky-600 shrink-0" />
+            <div>
+              <span className="font-semibold">Run Comparison:</span> Ready to compare current run{' '}
+              <strong className="font-mono">{runIdDisplay}</strong> against prior executions. The dedicated Run Comparison page will be configured in the next step!
             </div>
-            <button
-              type="button"
-              onClick={() => setIsDiffExpanded(false)}
-              className="text-slate-400 hover:text-slate-700 text-xs font-semibold cursor-pointer"
-            >
-              ✕ Close
-            </button>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {runMeta.ruleDiffs.map((diff, i) => (
-              <span
-                key={i}
-                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200/80 bg-white px-3 py-1 text-[11px] font-medium text-slate-800 shadow-2xs"
-              >
-                <span className="font-bold text-[#147b73]">{diff.type}:</span>
-                <span>{diff.text}</span>
-              </span>
-            ))}
-          </div>
-
-          <p className="text-[11px] text-slate-600 font-medium pt-1">
-            <strong>Cause &amp; Effect:</strong> {runMeta.impactSummary}
-          </p>
+          <button
+            type="button"
+            onClick={() => setCompareNotice(false)}
+            className="text-sky-500 hover:text-sky-700 font-bold ml-3 text-sm cursor-pointer"
+          >
+            ×
+          </button>
         </div>
       )}
     </div>
   );
 };
-

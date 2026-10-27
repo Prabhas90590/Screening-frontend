@@ -20,6 +20,8 @@ class ScreeningRunRecord(BaseModel):
     started_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    universe_count: Optional[int] = 0
+    selected_count: Optional[int] = 0
 
 
 class FunnelCountRecord(BaseModel):
@@ -58,8 +60,14 @@ class ScreeningResultRecord(BaseModel):
     nd_ebitda: Optional[str] = None
     yield_pct: Optional[float] = None
     eps_growth_pct: Optional[float] = None
+    pe_vs_benchmark: Optional[float] = None
+    price_to_sales: Optional[float] = None
+    price_to_cash_flow: Optional[float] = None
+    revenue_growth_fwd: Optional[float] = None
+    avg_daily_volume: Optional[float] = None
+    avg_daily_traded_value: Optional[float] = None
     data_confidence: str = "High"
-    stage_status: Literal["passed", "gate_dropped", "floor_dropped"] = "passed"
+    stage_status: Literal["passed", "gate_dropped", "floor_dropped","knocked_out"] = "passed"
     near_miss_status: Literal["none", "rank_near_miss", "rule_near_miss"] = "none"
     score_breakdown: List[Dict[str, Any]] = Field(default_factory=list)
     metric_statuses: Dict[str, str] = Field(default_factory=dict)

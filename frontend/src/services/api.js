@@ -127,13 +127,27 @@ export async function initiateScreening(payload) {
   }
 }
 
+/**
+ * Fetch historical screening runs ordered by started_at DESC from PostgreSQL.
+ */
+export async function fetchScreeningRuns(limit = 50) {
+  try {
+    const res = await fetch(`${API_BASE}/screenings?limit=${encodeURIComponent(limit)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch screening runs`);
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Could not fetch screening runs:', err.message);
+    return null;
+  }
+}
+
 
 /**
  * Fetch detailed screening results for a specific run from the database.
  */
-export async function fetchScreeningResults(runId, view = 'all') {
+export async function fetchScreeningResults(runId, view = 'all', limit = 250) {
   try {
-    const res = await fetch(`${API_BASE}/screenings/${encodeURIComponent(runId)}/results?view=${encodeURIComponent(view)}&limit=100`);
+    const res = await fetch(`${API_BASE}/screenings/${encodeURIComponent(runId)}/results?view=${encodeURIComponent(view)}&limit=${encodeURIComponent(limit)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch run results`);
     return await res.json();
   } catch (err) {

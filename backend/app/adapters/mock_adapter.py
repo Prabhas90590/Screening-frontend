@@ -302,7 +302,9 @@ class MockAdapter(BaseDataProvider):
     """Mock implementation of BaseDataProvider for local offline development."""
 
     def __init__(self):
-        self._securities = RAW_MOCK_SECURITIES
+        from app.adapters.indian_stocks_fixtures import INDIAN_MOCK_SECURITIES
+        from app.adapters.global_stocks_fixtures import GLOBAL_MOCK_SECURITIES
+        self._securities = RAW_MOCK_SECURITIES + INDIAN_MOCK_SECURITIES + GLOBAL_MOCK_SECURITIES
 
     @property
     def provider_name(self) -> str:
@@ -322,7 +324,9 @@ class MockAdapter(BaseDataProvider):
             raw_country = (raw.get("country") or raw.get("General", {}).get("CountryISO", "US")).lower()
             raw_exchange = (raw.get("exchange") or raw.get("General", {}).get("Exchange", "NASDAQ")).lower()
 
-            if raw_country == norm_country or norm_country in {"all", "*"}:
+            if (raw_country == norm_country or norm_country in {"all", "*"}) and (
+                not raw_exchange or raw_exchange == norm_exchange or norm_exchange in {"all", "*"}
+            ):
                 ticker = raw.get("ticker") or raw.get("Code", "UNKN")
                 listings.append(
                     NormalizedListing(
@@ -366,8 +370,13 @@ class MockAdapter(BaseDataProvider):
 
         filter_set = {t.strip().upper() for t in tickers} if tickers else None
         results: List[NormalizedSecurityData] = []
+        norm_exchange = exchange_id.lower()
 
         for raw in self._securities:
+            raw_exchange = (raw.get("exchange") or raw.get("General", {}).get("Exchange", "")).lower()
+            if raw_exchange and raw_exchange != norm_exchange and raw_exchange != "*":
+                continue
+
             cand_ticker = (raw.get("ticker") or raw.get("Code", "")).upper()
             if filter_set is None or cand_ticker in filter_set:
                 norm_data = normalize_vendor_payload(raw, default_exchange=exchange_id)

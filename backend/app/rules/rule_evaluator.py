@@ -32,12 +32,12 @@ def evaluate_condition(
 
     cond = condition.strip()
 
-    if cond in (">=", "discount"):
+    if cond in (">=", "discount", "gte"):
         passed = actual_value >= threshold
         reason = None if passed else f"Value {actual_value:.2f} is below required minimum >={threshold:.2f}"
         return passed, reason
 
-    elif cond == "<=":
+    elif cond in ("<=", "lte"):
         passed = actual_value <= threshold
         reason = None if passed else f"Value {actual_value:.2f} exceeds required maximum <={threshold:.2f}"
         return passed, reason
@@ -47,12 +47,12 @@ def evaluate_condition(
         reason = None if passed else f"Value {actual_value:.2f} does not match required ={threshold:.2f}"
         return passed, reason
 
-    elif cond == ">":
+    elif cond in (">", "gt"):
         passed = actual_value > threshold
         reason = None if passed else f"Value {actual_value:.2f} is not strictly greater than >{threshold:.2f}"
         return passed, reason
 
-    elif cond == "<":
+    elif cond in ("<", "lt"):
         passed = actual_value < threshold
         reason = None if passed else f"Value {actual_value:.2f} is not strictly less than <{threshold:.2f}"
         return passed, reason
@@ -104,7 +104,7 @@ def calculate_rule_score(
     cond = condition.strip()
 
     # Case A: Lower is better (e.g. Forward P/E <= 25, EV/EBITDA <= 15, Beta <= 1.2)
-    if cond == "<=":
+    if cond in ("<=", "lte"):
         if actual_value <= threshold:
             # Passed! Scale between 50% (at threshold) and 100% (at excellent benchmark)
             # Benchmark target is 40% of threshold (e.g., if threshold is 25x, target is 10x)

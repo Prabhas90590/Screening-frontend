@@ -43,6 +43,12 @@ class ScreenedSecurityResult(BaseModel):
     nd_ebitda: Optional[str] = None  # e.g. '3.4x' or 'net cash'
     yield_pct: Optional[float] = None
     eps_growth_pct: Optional[float] = None
+    pe_vs_benchmark: Optional[float] = None
+    price_to_sales: Optional[float] = None
+    price_to_cash_flow: Optional[float] = None
+    revenue_growth_fwd: Optional[float] = None
+    avg_daily_volume: Optional[float] = None
+    avg_daily_traded_value: Optional[float] = None
     data_confidence: Literal["High", "Medium", "Low"] = "High"
     decision: Optional[Literal["keep", "drop"]] = None
     decision_reason: Optional[str] = None

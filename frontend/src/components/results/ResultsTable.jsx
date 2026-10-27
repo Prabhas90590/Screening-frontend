@@ -36,6 +36,10 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
       return holdings || [];
     }
 
+    if (resultsTab === 'allScreened') {
+      return securities;
+    }
+
     if (resultsTab === 'changes') {
       return securities.filter((s) => {
         const isEntered = s.deltaStatus === 'entered' || s.rankDelta === 'NEW';
@@ -48,8 +52,9 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
 
     if (resultsTab === 'nearMisses') {
       return securities.filter((s) => {
-        const isRankMiss = s.rank !== null && s.rank >= 21 && s.rank <= 40;
+        const isRankMiss = s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40);
         const isRuleMiss =
+          s.nearMissStatus === 'rule_near_miss' ||
           s.deltaStatus === 'rule_miss' ||
           s.rankDelta === 'RULE_MISS' ||
           Object.values(s.metricStatuses || {}).some(
@@ -63,7 +68,7 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
 
     // Default: 'top20' (only actively qualified top 20 securities)
     return securities.filter(
-      (s) => s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited'
+      (s) => (s.stageStatus === 'passed' && s.rank <= 20) || (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited')
     );
   }, [resultsTab, changesSubTab, nearMissSubTab, securities, holdings]);
 
@@ -95,6 +100,10 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
 
   // Empty states per tab
   const emptyStateByTab = {
+    allScreened: {
+      title: 'No Screened Securities Found',
+      description: 'Run an instant screen or adjust search filters to view evaluated equities.',
+    },
     top20: {
       title: 'No Top 20 Securities Found',
       description: 'Adjust your sector, region, or search filters to view top qualifying companies.',

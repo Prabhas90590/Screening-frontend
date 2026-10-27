@@ -226,6 +226,12 @@ CREATE TABLE IF NOT EXISTS screening_results (
     nd_ebitda VARCHAR(32),
     yield_pct DOUBLE PRECISION,
     eps_growth_pct DOUBLE PRECISION,
+    pe_vs_benchmark DOUBLE PRECISION,
+    price_to_sales DOUBLE PRECISION,
+    price_to_cash_flow DOUBLE PRECISION,
+    revenue_growth_fwd DOUBLE PRECISION,
+    avg_daily_volume DOUBLE PRECISION,
+    avg_daily_traded_value DOUBLE PRECISION,
     data_confidence VARCHAR(16) DEFAULT 'High',
     stage_status VARCHAR(32) DEFAULT 'passed',
     near_miss_status VARCHAR(32) DEFAULT 'none',
@@ -494,6 +500,12 @@ CREATE TABLE IF NOT EXISTS screening_results (
     nd_ebitda VARCHAR(32),
     yield_pct DOUBLE PRECISION,
     eps_growth_pct DOUBLE PRECISION,
+    pe_vs_benchmark DOUBLE PRECISION,
+    price_to_sales DOUBLE PRECISION,
+    price_to_cash_flow DOUBLE PRECISION,
+    revenue_growth_fwd DOUBLE PRECISION,
+    avg_daily_volume DOUBLE PRECISION,
+    avg_daily_traded_value DOUBLE PRECISION,
     data_confidence VARCHAR(16) DEFAULT 'High',
     stage_status VARCHAR(32) DEFAULT 'passed',
     near_miss_status VARCHAR(32) DEFAULT 'none',
@@ -598,6 +610,12 @@ class DatabaseManager:
                 cursor.execute(POSTGRES_SCHEMA_SQL)
                 cursor.execute("ALTER TABLE rule_versions ADD COLUMN IF NOT EXISTS changes JSONB DEFAULT '[]';")
                 cursor.execute("ALTER TABLE rule_versions ADD COLUMN IF NOT EXISTS selected_countries JSONB DEFAULT '[]';")
+                cursor.execute("ALTER TABLE screening_results ADD COLUMN IF NOT EXISTS pe_vs_benchmark DOUBLE PRECISION;")
+                cursor.execute("ALTER TABLE screening_results ADD COLUMN IF NOT EXISTS price_to_sales DOUBLE PRECISION;")
+                cursor.execute("ALTER TABLE screening_results ADD COLUMN IF NOT EXISTS price_to_cash_flow DOUBLE PRECISION;")
+                cursor.execute("ALTER TABLE screening_results ADD COLUMN IF NOT EXISTS revenue_growth_fwd DOUBLE PRECISION;")
+                cursor.execute("ALTER TABLE screening_results ADD COLUMN IF NOT EXISTS avg_daily_volume DOUBLE PRECISION;")
+                cursor.execute("ALTER TABLE screening_results ADD COLUMN IF NOT EXISTS avg_daily_traded_value DOUBLE PRECISION;")
                 conn.commit()
                 logger.info("PostgreSQL persistence tables verified/created successfully.")
             else:

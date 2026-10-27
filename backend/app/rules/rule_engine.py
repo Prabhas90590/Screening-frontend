@@ -113,9 +113,14 @@ class RuleEngine:
         Returns:
             CompanyRuleEvaluation with stage passes, scores, and breakdowns
         """
-        version_id = getattr(profile, "version_id", "prof-custom")
-        profile_name = getattr(profile, "profile_name", "Custom Strategy")
-        raw_rules = getattr(profile, "rules", [])
+        if isinstance(profile, list):
+            raw_rules = profile
+            version_id = "prof-custom"
+            profile_name = "Custom Strategy"
+        else:
+            version_id = getattr(profile, "version_id", "prof-custom")
+            profile_name = getattr(profile, "profile_name", "Custom Strategy")
+            raw_rules = getattr(profile, "rules", []) or []
 
         output = CompanyRuleEvaluation(
             canonical_company_id=metrics.canonical_company_id,
@@ -132,15 +137,30 @@ class RuleEngine:
         near_miss_candidates = []
 
         for r in raw_rules:
-            metric_key = getattr(r, "metric_name", None) or getattr(r, "id", "")
+            _gv = lambda k, d=None: r.get(k, d) if isinstance(r, dict) else getattr(r, k, d)
+            metric_key = _gv("metric_name") or _gv("id", "")
             norm_key = metric_key.lower().replace("-", "_")
-            rule_id = getattr(r, "rule_id", None) or getattr(r, "id", norm_key)
-            label = getattr(r, "label", None) or getattr(r, "name", metric_key)
-            category = getattr(r, "category", "Valuation")
-            mode = getattr(r, "mode", "Both")
-            condition = getattr(r, "condition", ">=")
-            threshold = float(getattr(r, "threshold_value", None) or getattr(r, "value", 0.0))
-            weight = float(getattr(r, "weight", 0.0))
+            rule_id = _gv("rule_id") or _gv("id", norm_key)
+            label = _gv("label") or _gv("name", metric_key)
+            category = _gv("category", "Valuation")
+            raw_mode = _gv("mode", "Both")
+            if raw_mode:
+                m_str = str(raw_mode).lower().strip()
+                if m_str in ("gate", "req", "req."):
+                    mode = "Req."
+                elif m_str in ("score", "scoring"):
+                    mode = "Score"
+                elif m_str in ("both", "all"):
+                    mode = "Both"
+                elif m_str in ("off", "disabled", "false"):
+                    mode = "Off"
+                else:
+                    mode = raw_mode
+            else:
+                mode = "Both"
+            condition = _gv("condition", ">=")
+            threshold = float(_gv("threshold_value") if _gv("threshold_value") is not None else (_gv("value", 0.0) or 0.0))
+            weight = float(_gv("weight", 0.0) or 0.0)
 
             # Skip Off rules
             if mode == "Off":

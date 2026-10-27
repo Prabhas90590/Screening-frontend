@@ -1263,6 +1263,7 @@ export const INITIAL_RULE_METRICS = [
   ['Avg daily traded value (USD)', 'Size & liquidity'],
   ['Data confidence', 'Quality'],
   ['Price / sales', 'Valuation'],
+  ['Forward P/E', 'Valuation'],
   ['Forward P/E vs S&P 500', 'Valuation'],
   ['PEG', 'Valuation'],
   ['EV / EBITDA', 'Valuation'],

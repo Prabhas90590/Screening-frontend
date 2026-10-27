@@ -113,7 +113,31 @@ class ScreeningRepository:
         """List historical screening runs ordered by start time descending."""
         conn = db_manager.get_connection()
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-        query = "SELECT * FROM screening_runs ORDER BY started_at DESC LIMIT %s" if is_postgres else "SELECT * FROM screening_runs ORDER BY started_at DESC LIMIT ?"
+        query = """
+            SELECT 
+                r.run_id, r.status, r.provider, r.rule_version_id, r.profile_name,
+                r.display_currency, r.selected_countries, r.selected_exchanges,
+                r.rules_snapshot, r.duration_ms, r.started_at, r.completed_at,
+                r.error_message,
+                COALESCE(f.universe_count, 0) as universe_count,
+                COALESCE(f.selected_count, 0) as selected_count
+            FROM screening_runs r
+            LEFT JOIN funnel_counts f ON r.run_id = f.run_id
+            ORDER BY r.started_at DESC
+            LIMIT %s
+        """ if is_postgres else """
+            SELECT 
+                r.run_id, r.status, r.provider, r.rule_version_id, r.profile_name,
+                r.display_currency, r.selected_countries, r.selected_exchanges,
+                r.rules_snapshot, r.duration_ms, r.started_at, r.completed_at,
+                r.error_message,
+                COALESCE(f.universe_count, 0) as universe_count,
+                COALESCE(f.selected_count, 0) as selected_count
+            FROM screening_runs r
+            LEFT JOIN funnel_counts f ON r.run_id = f.run_id
+            ORDER BY r.started_at DESC
+            LIMIT ?
+        """
 
         try:
             cursor = conn.cursor()
@@ -245,10 +269,11 @@ class ScreeningRepository:
                 country, exchange, sector, rank, score,
                 display_price, market_cap_display, display_currency,
                 fwd_pe, peg, ev_ebitda, beta, nd_ebitda, yield_pct, eps_growth_pct,
+                pe_vs_benchmark, price_to_sales, price_to_cash_flow, revenue_growth_fwd, avg_daily_volume, avg_daily_traded_value,
                 data_confidence, stage_status, near_miss_status,
                 score_breakdown, metric_statuses, created_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (id) DO UPDATE SET
                 rank = EXCLUDED.rank,
@@ -261,9 +286,10 @@ class ScreeningRepository:
                 country, exchange, sector, rank, score,
                 display_price, market_cap_display, display_currency,
                 fwd_pe, peg, ev_ebitda, beta, nd_ebitda, yield_pct, eps_growth_pct,
+                pe_vs_benchmark, price_to_sales, price_to_cash_flow, revenue_growth_fwd, avg_daily_volume, avg_daily_traded_value,
                 data_confidence, stage_status, near_miss_status,
                 score_breakdown, metric_statuses, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 rank = excluded.rank,
                 score = excluded.score,
@@ -299,6 +325,12 @@ class ScreeningRepository:
                     r.nd_ebitda,
                     r.yield_pct,
                     r.eps_growth_pct,
+                    r.pe_vs_benchmark,
+                    r.price_to_sales,
+                    r.price_to_cash_flow,
+                    r.revenue_growth_fwd,
+                    r.avg_daily_volume,
+                    r.avg_daily_traded_value,
                     r.data_confidence,
                     r.stage_status,
                     r.near_miss_status,
@@ -346,8 +378,9 @@ class ScreeningRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(query, tuple(params))
-            rows = cursor.fetchall()
-            return [self._row_to_result(row, is_postgres) for row in rows]
+            col_names = [desc[0] for desc in cursor.description]
+            rows = [dict(zip(col_names, r)) for r in cursor.fetchall()]
+            return [self._row_to_result(row, is_postgres=False) for row in rows]
         finally:
             conn.close()
 
@@ -371,6 +404,8 @@ class ScreeningRepository:
                 started_at=row[10] if isinstance(row[10], datetime) else datetime.fromisoformat(str(row[10])),
                 completed_at=row[11] if (row[11] is None or isinstance(row[11], datetime)) else datetime.fromisoformat(str(row[11])),
                 error_message=row[12],
+                universe_count=int(row[13]) if len(row) > 13 and row[13] is not None else 0,
+                selected_count=int(row[14]) if len(row) > 14 and row[14] is not None else 0,
             )
         else:
             return ScreeningRunRecord(
@@ -387,6 +422,8 @@ class ScreeningRepository:
                 started_at=datetime.fromisoformat(str(row["started_at"])),
                 completed_at=datetime.fromisoformat(str(row["completed_at"])) if row["completed_at"] else None,
                 error_message=row["error_message"],
+                universe_count=int(row["universe_count"]) if "universe_count" in row.keys() and row["universe_count"] is not None else 0,
+                selected_count=int(row["selected_count"]) if "selected_count" in row.keys() and row["selected_count"] is not None else 0,
             )
 
     def _row_to_result(self, row: Any, is_postgres: bool) -> ScreeningResultRecord:
@@ -412,12 +449,18 @@ class ScreeningRepository:
                 nd_ebitda=row[17],
                 yield_pct=row[18],
                 eps_growth_pct=row[19],
-                data_confidence=row[20] or "High",
-                stage_status=row[21] or "passed",
-                near_miss_status=row[22] or "none",
-                score_breakdown=row[23] if isinstance(row[23], list) else json.loads(row[23] or "[]"),
-                metric_statuses=row[24] if isinstance(row[24], dict) else json.loads(row[24] or "{}"),
-                created_at=row[25] if isinstance(row[25], datetime) else datetime.fromisoformat(str(row[25])),
+                pe_vs_benchmark=row[20],
+                price_to_sales=row[21],
+                price_to_cash_flow=row[22],
+                revenue_growth_fwd=row[23],
+                avg_daily_volume=row[24],
+                avg_daily_traded_value=row[25],
+                data_confidence=row[26] or "High",
+                stage_status=row[27] or "passed",
+                near_miss_status=row[28] or "none",
+                score_breakdown=row[29] if isinstance(row[29], list) else json.loads(row[29] or "[]"),
+                metric_statuses=row[30] if isinstance(row[30], dict) else json.loads(row[30] or "{}"),
+                created_at=row[31] if isinstance(row[31], datetime) else datetime.fromisoformat(str(row[31])),
             )
         else:
             return ScreeningResultRecord(
@@ -441,12 +484,18 @@ class ScreeningRepository:
                 nd_ebitda=row["nd_ebitda"],
                 yield_pct=row["yield_pct"],
                 eps_growth_pct=row["eps_growth_pct"],
+                pe_vs_benchmark=row.get("pe_vs_benchmark") if hasattr(row, "get") else row["pe_vs_benchmark"],
+                price_to_sales=row.get("price_to_sales") if hasattr(row, "get") else row["price_to_sales"],
+                price_to_cash_flow=row.get("price_to_cash_flow") if hasattr(row, "get") else row["price_to_cash_flow"],
+                revenue_growth_fwd=row.get("revenue_growth_fwd") if hasattr(row, "get") else row["revenue_growth_fwd"],
+                avg_daily_volume=row.get("avg_daily_volume") if hasattr(row, "get") else row["avg_daily_volume"],
+                avg_daily_traded_value=row.get("avg_daily_traded_value") if hasattr(row, "get") else row["avg_daily_traded_value"],
                 data_confidence=row["data_confidence"] or "High",
                 stage_status=row["stage_status"] or "passed",
                 near_miss_status=row["near_miss_status"] or "none",
-                score_breakdown=json.loads(row["score_breakdown"] or "[]"),
-                metric_statuses=json.loads(row["metric_statuses"] or "{}"),
-                created_at=datetime.fromisoformat(str(row["created_at"])),
+                score_breakdown=row["score_breakdown"] if isinstance(row["score_breakdown"], list) else json.loads(row["score_breakdown"] or "[]"),
+                metric_statuses=row["metric_statuses"] if isinstance(row["metric_statuses"], dict) else json.loads(row["metric_statuses"] or "{}"),
+                created_at=row["created_at"] if isinstance(row["created_at"], datetime) else datetime.fromisoformat(str(row["created_at"])),
             )
 
 

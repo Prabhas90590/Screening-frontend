@@ -21,6 +21,7 @@ import {
   fetchScreeningResults,
   fetchRunComparison,
   initiateScreening,
+  fetchScreeningRuns,
 } from '../services/api';
 
 const ScreeningContext = createContext(null);
@@ -68,11 +69,20 @@ function reconstructSnapshotFromBackend(bp) {
       : c.selected,
   }));
 
+  const savedSnapshot = bp.diversification_rules?.snapshot;
+  const savedExchanges = savedSnapshot?.exchanges || [];
+  const selectedExchSet = new Set(savedExchanges.filter((e) => e.selected).map((e) => e.id.toLowerCase()));
+
+  const exchanges = INITIAL_EXCHANGES.map((e) => ({
+    ...e,
+    selected: selectedExchSet.size > 0 ? selectedExchSet.has(e.id.toLowerCase()) : e.selected,
+  }));
+
   return {
     metrics,
     sectorLimits,
     countries,
-    exchanges: INITIAL_EXCHANGES.map((e) => ({ ...e })),
+    exchanges,
     sectors: INITIAL_SECTORS.map((s) => ({ ...s })),
     diversification: { ...INITIAL_DIVERSIFICATION },
   };
@@ -338,7 +348,7 @@ export const ScreeningProvider = ({ children }) => {
   const [selectedProfileName, setSelectedProfileName] = useState('No active profile');
   const [draftProfileName, setDraftProfileName] = useState('');
 
-  const [securities, setSecurities] = useState(INITIAL_SECURITIES);
+  const [securities, setSecurities] = useState([]);
   const [selectedSecurityId, setSelectedSecurityId] = useState(null);
 
   const [filterSector, setFilterSector] = useState('All');
@@ -348,17 +358,24 @@ export const ScreeningProvider = ({ children }) => {
 
   const [funnelState, setFunnelState] = useState(INITIAL_FUNNEL);
   const [scheduleConfig, setScheduleConfig] = useState(INITIAL_SCHEDULE);
-  const [runHistory, setRunHistory] = useState(INITIAL_RUN_HISTORY);
-  const [selectedRunId, setSelectedRunId] = useState('run-005');
-  const [compareRunId, setCompareRunId] = useState('run-004');
+  const [runHistory, setRunHistory] = useState([]);
+  const [selectedRunId, setSelectedRunId] = useState(null);
+  const [compareRunId, setCompareRunId] = useState('none');
   const [backendRunComparison, setBackendRunComparison] = useState(null);
+  const [isScreeningRunning, setIsScreeningRunning] = useState(false);
+  const [screeningError, setScreeningError] = useState(null);
+  const [screeningRunSuccess, setScreeningRunSuccess] = useState(null);
 
   // Dual-mode run results loader: PostgreSQL Backend first, Mock fallback
   useEffect(() => {
     let isMounted = true;
 
     async function loadResults() {
-      // 1. Attempt to fetch real database results from FastAPI / PostgreSQL
+      if (!selectedRunId) {
+        if (isMounted) setSecurities([]);
+        return;
+      }
+
       try {
         const realResults = await fetchScreeningResults(selectedRunId);
         if (isMounted && Array.isArray(realResults) && realResults.length > 0) {
@@ -379,7 +396,17 @@ export const ScreeningProvider = ({ children }) => {
             ndEbitda: r.nd_ebitda,
             yieldPct: r.yield_pct,
             epsGrowthPct: r.eps_growth_pct,
+            peVsBenchmark: r.pe_vs_benchmark,
+            priceToSales: r.price_to_sales,
+            priceToCashFlow: r.price_to_cash_flow,
+            revenueGrowthFwd: r.revenue_growth_fwd,
+            avgDailyVolume: r.avg_daily_volume,
+            avgDailyTradedValue: r.avg_daily_traded_value,
             dataConfidence: r.data_confidence || 'High',
+            marketCapDisplay: r.market_cap_display,
+            marketCapCategory: (r.market_cap_display && r.market_cap_display >= 10e9) ? 'Large-cap Quality' : ((r.market_cap_display && r.market_cap_display >= 2e9) ? 'Mid-cap Value' : 'Small-cap Growth'),
+            stageStatus: r.stage_status || 'passed',
+            nearMissStatus: r.near_miss_status || 'none',
             deltaStatus: r.stage_status === 'passed' ? 'retained' : 'exited',
             movementReason: r.near_miss_status !== 'none' ? r.near_miss_status : '',
             scoreBreakdown: r.score_breakdown || [],
@@ -389,12 +416,11 @@ export const ScreeningProvider = ({ children }) => {
           return;
         }
       } catch (err) {
-        // Backend not ready or table empty, proceed to mock
+        console.warn('[ScreeningContext] Could not load results for run:', selectedRunId, err);
       }
 
-      // 2. Fall back to rich mock data for selected run
-      if (isMounted && selectedRunId && MOCK_SECURITIES_BY_RUN && MOCK_SECURITIES_BY_RUN[selectedRunId]) {
-        setSecurities(MOCK_SECURITIES_BY_RUN[selectedRunId]);
+      if (isMounted) {
+        setSecurities([]);
       }
     }
 
@@ -493,6 +519,7 @@ export const ScreeningProvider = ({ children }) => {
 
   const [editingVersion, setEditingVersion] = useState(null);
   const activeProfile = profiles.find((profile) => profile.badge === 'Active');
+  const currentRun = runHistory.find((r) => r.id === selectedRunId) || runHistory[0] || null;
 
   const selectedSecurity = securities.find((s) => s.id === selectedSecurityId) || null;
   const selectedSectorNames = sectors.filter((sector) => sector.selected).map((sector) => sector.name);
@@ -674,6 +701,7 @@ export const ScreeningProvider = ({ children }) => {
     }
 
     loadBackendProfiles();
+    loadRunHistory();
 
     return () => {
       isMounted = false;
@@ -715,32 +743,175 @@ export const ScreeningProvider = ({ children }) => {
     setScheduleConfig((prev) => ({ ...prev, ...updates }));
   };
 
-  const triggerRunNow = () => {
-    const nextRunNumber = funnelState.runInfo.runNumber + 1;
-    const newHistoryItem = {
-      id: String(nextRunNumber),
-      run: `#${nextRunNumber}`,
-      started: 'Just now',
-      rules: activeProfile ? `${activeProfile.name} v${activeProfile.versionNumber}` : 'No active profile',
-      profile: activeProfile?.name || 'No active profile',
-      version: activeProfile ? `Version ${activeProfile.versionNumber}` : '-',
-      screened: 1215,
-      selected: 20,
-      status: 'Succeeded',
-      duration: '9 min',
-    };
-    setRunHistory([newHistoryItem, ...runHistory]);
-    setFunnelState((prev) => ({
-      ...prev,
-      runInfo: {
-        ...prev.runInfo,
-        runNumber: nextRunNumber,
-        asOfDate: 'data updated just now',
-      },
-    }));
+    const loadRunHistory = async () => {
+    try {
+      const runs = await fetchScreeningRuns(50);
+      if (runs && Array.isArray(runs)) {
+        if (runs.length === 0) {
+          setRunHistory([]);
+          setSelectedRunId(null);
+          setSecurities([]);
+          return;
+        }
+
+        const mapped = runs.map((r) => {
+          const startedDate = r.started_at ? new Date(r.started_at) : null;
+          const startedStr = startedDate
+            ? startedDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) +
+              ', ' +
+              startedDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+            : 'Just now';
+
+          const durationStr = r.duration_ms
+            ? (r.duration_ms >= 1000 ? `${(r.duration_ms / 1000).toFixed(1)}s` : `${Math.round(r.duration_ms)}ms`)
+            : (r.status === 'running' ? 'In progress...' : '0ms');
+
+          // Auto-append version tag if not already part of profile_name
+          let displayRulesName = r.profile_name || 'Custom Strategy';
+          if (r.rule_version_id && !displayRulesName.toLowerCase().includes('version') && !displayRulesName.toLowerCase().includes('v1') && !displayRulesName.toLowerCase().includes('v2')) {
+            const matched = versionHistory.find((v) => v.id === r.rule_version_id) || profiles.find((p) => p.id === r.rule_version_id);
+            if (matched && matched.versionNumber) {
+              displayRulesName = `${displayRulesName} - Version ${matched.versionNumber}`;
+            }
+          }
+
+          return {
+            id: r.run_id,
+            run: r.run_id,
+            started: startedStr,
+            rawStarted: r.started_at,
+            rules: displayRulesName,
+            rule_version_id: r.rule_version_id,
+            screened: r.status === 'running' ? 'Evaluating...' : (r.universe_count || 0),
+            selected: r.status === 'running' ? '—' : (r.selected_count || 0),
+            status: r.status === 'succeeded' ? 'Succeeded' : (r.status === 'running' ? 'Running' : 'Failed'),
+            duration: durationStr,
+            duration_ms: r.duration_ms,
+            countries: r.selected_countries || [],
+            exchanges: r.selected_exchanges || [],
+          };
+        });
+        setRunHistory(mapped);
+        setSelectedRunId((prev) => {
+          const exists = mapped.some((item) => item.id === prev);
+          return exists ? prev : mapped[0].id;
+        });
+      }
+    } catch (err) {
+      console.warn('[ScreeningContext] Could not load run history from backend:', err);
+      setRunHistory([]);
+      setSelectedRunId(null);
+      setSecurities([]);
+    }
   };
 
-  const loadConfiguration = (snapshot, navigateToCatalog = true) => {
+  const triggerRunNow = async (profileIdToRun) => {
+    setIsScreeningRunning(true);
+    setScreeningError(null);
+    setScreeningRunSuccess(null);
+
+    const targetProfile = profiles.find((p) => p.id === profileIdToRun);
+    if (!targetProfile) {
+      setIsScreeningRunning(false);
+      throw new Error('Please select a profile first before running.');
+    }
+
+    // Prepend in-progress run record so the user immediately sees progress in Run History table
+    const tempRunId = `run-${new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14)}`;
+    const inProgressItem = {
+      id: tempRunId,
+      run: tempRunId,
+      started: 'Just now',
+      rules: `${targetProfile.name} - Version ${targetProfile.versionNumber || '1.0'}`,
+      screened: 'Evaluating...',
+      selected: '—',
+      status: 'Running',
+      duration: 'In progress...',
+    };
+    setRunHistory((prev) => [inProgressItem, ...prev]);
+
+    try {
+      // Resolve countries & exchanges from the selected profile's snapshot first!
+      const profileSnapshot = targetProfile?.snapshot || targetProfile?.diversification_rules?.snapshot;
+
+      let targetExchanges = [];
+      if (profileSnapshot?.exchanges && Array.isArray(profileSnapshot.exchanges)) {
+        targetExchanges = profileSnapshot.exchanges.filter((e) => e.selected).map((e) => e.id.toLowerCase());
+      }
+      if (targetExchanges.length === 0) {
+        targetExchanges = exchanges.filter((e) => e.selected).map((e) => e.id.toLowerCase());
+      }
+      if (targetExchanges.length === 0) {
+        targetExchanges = ['nse'];
+      }
+
+      let targetCountries = [];
+      if (profileSnapshot?.countries && Array.isArray(profileSnapshot.countries)) {
+        targetCountries = profileSnapshot.countries.filter((c) => c.selected).map((c) => c.id.toLowerCase());
+      }
+      if (targetCountries.length === 0) {
+        targetCountries = countries.filter((c) => c.selected).map((c) => c.id.toLowerCase());
+      }
+      if (targetCountries.length === 0) {
+        targetCountries = ['in'];
+      }
+
+      const payload = {
+        countries: targetCountries,
+        exchanges: targetExchanges,
+        rule_version_id: targetProfile.id,
+        profile_name: `${targetProfile.name} - Version ${targetProfile.versionNumber || '1.0'}`,
+        display_currency: 'USD',
+      };
+
+      console.log('[ScreeningContext] Triggering instant run with profile:', payload);
+      const response = await initiateScreening(payload);
+
+      if (response && response.run_id) {
+        setScreeningRunSuccess({
+          runId: response.run_id,
+          durationMs: response.duration_ms,
+          screenedCount: response.funnel?.universe || 0,
+          selectedCount: response.funnel?.selected || 0,
+        });
+
+        // Update funnel counts in UI
+        if (response.funnel) {
+          setFunnelState((prev) => ({
+            ...prev,
+            counts: {
+              universe: response.funnel.universe,
+              markets: response.funnel.markets,
+              floors: response.funnel.floors,
+              gates: response.funnel.gates,
+              score: response.funnel.score,
+              shortlist: response.funnel.shortlist,
+              selected: response.funnel.selected,
+            },
+            runInfo: {
+              ...prev.runInfo,
+              asOfDate: `Run ${response.run_id} completed`,
+            },
+          }));
+        }
+
+        // Refresh runs list from PostgreSQL and set active run
+        await loadRunHistory();
+        setSelectedRunId(response.run_id);
+        return response;
+      }
+    } catch (err) {
+      console.error('[ScreeningContext] Instant run failed:', err);
+      setScreeningError(err.message || 'Screening execution failed');
+      // Remove temporary in-progress item on failure
+      setRunHistory((prev) => prev.filter((r) => r.id !== tempRunId));
+      throw err;
+    } finally {
+      setIsScreeningRunning(false);
+    }
+  };
+
+const loadConfiguration = (snapshot, navigateToCatalog = true) => {
     if (!snapshot) return;
     const metrics = (snapshot.metrics || []).map((metric) => ({ ...metric }));
     const limits = (snapshot.sectorLimits || []).map((item) => ({ ...item }));
@@ -1216,9 +1387,16 @@ export const ScreeningProvider = ({ children }) => {
         runHistory,
         selectedRunId,
         setSelectedRunId,
+        currentRun,
         compareRunId,
         setCompareRunId,
         triggerRunNow,
+        loadRunHistory,
+        isScreeningRunning,
+        screeningError,
+        screeningRunSuccess,
+        setScreeningError,
+        setScreeningRunSuccess,
         profiles,
         activateProfile,
         versionHistory,

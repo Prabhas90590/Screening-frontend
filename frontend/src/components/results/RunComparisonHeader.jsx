@@ -77,7 +77,7 @@ export const RunComparisonHeader = () => {
             <span>Compare with:</span>
           </div>
           <select
-            value={compareRunId || 'run-004'}
+            value={compareRunId || 'none'}
             onChange={(e) => setCompareRunId && setCompareRunId(e.target.value)}
             className="rounded-md border border-slate-300 bg-slate-50/80 px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-[#147b73] focus:outline-hidden cursor-pointer"
           >
