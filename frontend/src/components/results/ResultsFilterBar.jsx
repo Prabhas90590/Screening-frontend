@@ -2,6 +2,7 @@ import React from 'react';
 import { useScreening } from '../../context/ScreeningContext';
 
 export const ResultsFilterBar = ({
+  holdings = [],
   uploadHoldingsFile,
   holdingsUploadError,
   holdingsUploadSummary,
@@ -47,7 +48,7 @@ export const ResultsFilterBar = ({
     { id: 'nearMisses', label: `⚠️ Near Misses (${nearMissCount})` },
     { id: 'allScreened', label: `📋 All Evaluated (${securities.length})` },
     { id: 'changes', label: `🔄 Turnover (${enteredCount} In / ${exitedCount} Out)` },
-    { id: 'myHoldings', label: '💼 My Holdings' },
+    { id: 'myHoldings', label: holdings && holdings.length > 0 ? `💼 My Holdings (${holdings.length})` : '💼 My Holdings' },
   ];
 
   return (

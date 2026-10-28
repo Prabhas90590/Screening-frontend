@@ -72,12 +72,16 @@ class FunnelService:
                 breakdown.append(
                     MetricScoreBreakdownItem(
                         name=name,
+                        category=metric.get("category", "General"),
+                        mode=mode,
                         score=0.0,
                         max_score=max_pts,
                         value_display="n/a",
                         benchmark_display=f"{condition} {threshold}",
                         percentage=0.0,
                         status="miss",
+                        passed=False,
+                        failure_reason="Metric data unavailable",
                     )
                 )
                 continue
@@ -110,12 +114,16 @@ class FunnelService:
             breakdown.append(
                 MetricScoreBreakdownItem(
                     name=name,
+                    category=metric.get("category", "General"),
+                    mode=mode,
                     score=awarded,
                     max_score=max_pts,
                     value_display=f"{actual_val:.1f}" if isinstance(actual_val, float) else str(actual_val),
                     benchmark_display=f"{condition} {threshold}",
                     percentage=percentage,
                     status=status_val,
+                    passed=passed,
+                    failure_reason=None if passed else f"Value {actual_val} failed {condition} {threshold}",
                 )
             )
 

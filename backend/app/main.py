@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.health import router as health_router
+from app.api.routes.holdings import router as holdings_router
 from app.api.routes.rules import router as rules_router
 from app.api.routes.screening import router as screening_router
 from app.core.config import settings
@@ -66,6 +67,7 @@ register_error_handlers(app)
 app.include_router(health_router)
 app.include_router(screening_router)
 app.include_router(rules_router)
+app.include_router(holdings_router)
 
 
 @app.get("/", tags=["root"])

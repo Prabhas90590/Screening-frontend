@@ -408,7 +408,8 @@ export const ScreeningProvider = ({ children }) => {
             stageStatus: r.stage_status || 'passed',
             nearMissStatus: r.near_miss_status || 'none',
             deltaStatus: r.stage_status === 'passed' ? 'retained' : 'exited',
-            movementReason: r.near_miss_status !== 'none' ? r.near_miss_status : '',
+            movementReason: r.metric_statuses?.diversification || (r.near_miss_status !== 'none' ? (r.near_miss_status === 'rank_near_miss' ? 'Rank Near-Miss' : 'Rule Near-Miss') : ''),
+            decisionReason: r.metric_statuses?.diversification || r.decision_reason || '',
             scoreBreakdown: r.score_breakdown || [],
             metricStatuses: r.metric_statuses || {},
           }));

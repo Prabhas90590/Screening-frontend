@@ -169,3 +169,118 @@ export async function fetchRunComparison(runId, prevRunId) {
     return null;
   }
 }
+
+/**
+ * =========================================================================
+ * PHASE 15: HOLDINGS IMPORT AND STORAGE API METHODS
+ * =========================================================================
+ */
+
+/**
+ * Upload a CSV or Excel holdings file to the backend for ingestion into PostgreSQL.
+ */
+export async function uploadHoldingsFile(file, portfolioName = 'Core Equity Fund') {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('portfolio_name', portfolioName);
+
+  try {
+    const res = await fetch(`${API_BASE}/holdings/import`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `HTTP ${res.status}: Upload failed`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.error('[API] Failed to upload holdings file:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Fetch all persistent portfolio holdings from PostgreSQL.
+ */
+export async function fetchHoldings(portfolioName = null) {
+  try {
+    const url = portfolioName
+      ? `${API_BASE}/holdings?portfolio_name=${encodeURIComponent(portfolioName)}`
+      : `${API_BASE}/holdings`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch holdings`);
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Could not fetch holdings:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Fetch portfolio allocation and diversification summary.
+ */
+export async function fetchHoldingsSummary(portfolioName = 'Core Equity Fund') {
+  try {
+    const res = await fetch(`${API_BASE}/holdings/summary?portfolio_name=${encodeURIComponent(portfolioName)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch holdings summary`);
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Could not fetch holdings summary:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Manually add a position to the portfolio.
+ */
+export async function addManualHolding(holdingData) {
+  try {
+    const res = await fetch(`${API_BASE}/holdings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(holdingData),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `HTTP ${res.status}: Failed to create holding`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.error('[API] Failed to create holding:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Delete a single holding by ID from PostgreSQL.
+ */
+export async function deleteHolding(holdingId) {
+  try {
+    const res = await fetch(`${API_BASE}/holdings/${encodeURIComponent(holdingId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to delete holding`);
+    return await res.json();
+  } catch (err) {
+    console.error('[API] Failed to delete holding:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Clear all holdings from a portfolio in PostgreSQL.
+ */
+export async function clearHoldings(portfolioName = null) {
+  try {
+    const url = portfolioName
+      ? `${API_BASE}/holdings?portfolio_name=${encodeURIComponent(portfolioName)}`
+      : `${API_BASE}/holdings`;
+    const res = await fetch(url, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to clear holdings`);
+    return await res.json();
+  } catch (err) {
+    console.error('[API] Failed to clear holdings:', err.message);
+    throw err;
+  }
+}

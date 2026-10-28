@@ -20,6 +20,10 @@ class MetricScoreBreakdownItem(BaseModel):
     status: Literal["full", "threshold", "miss", "off", "exempt"] = Field(
         default="full", description="Pass/threshold/miss/exempt status"
     )
+    category: Optional[str] = Field(default="General", description="Metric category e.g. Valuation, Growth")
+    mode: Optional[str] = Field(default="Score", description="Rule evaluation mode: Req., Score, Both, Off")
+    passed: Optional[bool] = Field(default=True, description="Whether rule passed condition")
+    failure_reason: Optional[str] = Field(default=None, description="Detailed reason if rule breached")
 
 
 class ScreenedSecurityResult(BaseModel):

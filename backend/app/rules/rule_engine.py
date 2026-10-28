@@ -252,12 +252,16 @@ class RuleEngine:
             output.score_breakdown.append(
                 MetricScoreBreakdownItem(
                     name=label,
+                    category=category,
+                    mode=mode,
                     score=points_earned,
                     max_score=effective_weight,
                     value_display=val_display,
                     benchmark_display=f"{condition} {threshold}",
                     percentage=round(score_pct, 1),
                     status="exempt" if is_exempt else status,  # type: ignore
+                    passed=passed,
+                    failure_reason=failure_reason,
                 )
             )
 

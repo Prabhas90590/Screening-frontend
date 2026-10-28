@@ -299,11 +299,71 @@ class ScreeningService:
                     return "Mid-cap Value"
                 return "Small-cap Growth"
 
+            # Resolve Diversification Rules (Portfolio Guardrails for Top 20)
+            div_rules = {}
+            if active_version and getattr(active_version, "diversification_rules", None):
+                div_rules = active_version.diversification_rules
+            elif request.rules_config and getattr(request.rules_config, "diversification_rules", None):
+                div_rules = request.rules_config.diversification_rules
+
+            if not isinstance(div_rules, dict):
+                div_rules = {}
+
+            snapshot_div = div_rules.get("snapshot", {}).get("diversification", {}) if isinstance(div_rules.get("snapshot"), dict) else {}
+
+            def _get_div_int(k1: str, k2: str):
+                val = div_rules.get(k1) if div_rules.get(k1) is not None else div_rules.get(k2)
+                if val is None or str(val).strip() == "":
+                    val = snapshot_div.get(k1) if snapshot_div.get(k1) is not None else snapshot_div.get(k2)
+                try:
+                    if val is not None and str(val).strip() != "":
+                        return int(val)
+                except (ValueError, TypeError):
+                    pass
+                return None
+
+            max_names_per_sector = _get_div_int("maxNamesPerSector", "max_names_per_sector")
+            max_names_per_country = _get_div_int("maxNamesPerCountry", "max_names_per_country")
+
+            # Apply Institutional Top 20 Portfolio Selection enforcing Sector & Country concentration caps
+            selected_top20_evals = []
+            displaced_evals = []
+            sector_counts = defaultdict(int)
+            country_counts = defaultdict(int)
+
+            for e in passed_evals:
+                comp = companies_by_id.get(e.canonical_company_id)
+                sec = comp.sector if comp and comp.sector else "General"
+                cntry = comp.country.upper() if comp and comp.country else "IN"
+
+                if len(selected_top20_evals) < 20:
+                    # Enforce Sector Cap
+                    if max_names_per_sector is not None and max_names_per_sector > 0 and sector_counts[sec] >= max_names_per_sector:
+                        displaced_evals.append((e, f"Sector limit reached (max {max_names_per_sector} in {sec})"))
+                        continue
+
+                    # Enforce Country Cap (for non-US markets)
+                    if max_names_per_country is not None and max_names_per_country > 0 and cntry != "US" and country_counts[cntry] >= max_names_per_country:
+                        displaced_evals.append((e, f"Country limit reached (max {max_names_per_country} in {cntry})"))
+                        continue
+
+                    selected_top20_evals.append(e)
+                    sector_counts[sec] += 1
+                    country_counts[cntry] += 1
+                else:
+                    displaced_evals.append((e, "Rank cut-off (outside Top 20)"))
+
+            # Combine in definitive ranking order: Selected Top 20 first, followed by displaced & remaining passing candidates
+            ordered_passing_evals = []
+            for e in selected_top20_evals:
+                ordered_passing_evals.append((e, True, ""))
+            for e, reason in displaced_evals:
+                ordered_passing_evals.append((e, False, reason))
+
             # 5A. Process passing securities (Rank 1..N)
-            for idx, e in enumerate(passed_evals):
+            for idx, (e, is_top20, displacement_reason) in enumerate(ordered_passing_evals):
                 rank = idx + 1
-                is_top20 = rank <= 20
-                stage_status = "passed" 
+                stage_status = "passed"
                 near_miss_status = "none" if is_top20 else "rank_near_miss"
 
                 comp = companies_by_id.get(e.canonical_company_id)
@@ -311,9 +371,12 @@ class ScreeningService:
                 ticker = comp.primary_ticker if comp else e.ticker
                 company_name = comp.name if comp else f"{ticker} Ltd"
                 country = comp.country.upper() if comp else "IN"
+                exchange = comp.primary_exchange.upper() if (comp and comp.primary_exchange) else primary_exchange_default
                 sector = comp.sector if comp else "General"
 
                 metric_statuses = {item.name: item.status for item in e.score_breakdown}
+                if displacement_reason and not is_top20 and displacement_reason != "Rank cut-off (outside Top 20)":
+                    metric_statuses["diversification"] = displacement_reason
                 score_breakdown_dicts = [
                     item.model_dump() if hasattr(item, "model_dump") else item.__dict__
                     for item in e.score_breakdown
@@ -326,7 +389,7 @@ class ScreeningService:
                     ticker=ticker,
                     company_name=company_name,
                     country=country,
-                    exchange=primary_exchange_default,
+                    exchange=exchange,
                     sector=sector,
                     rank=rank,
                     score=int(round(e.total_score)),
@@ -363,7 +426,7 @@ class ScreeningService:
                             name=company_name,
                             ticker=ticker,
                             country=country,
-                            exchange=primary_exchange_default,
+                            exchange=exchange,
                             sector=sector,
                             market_cap_category=_get_cap_category(m_rec),
                             score=int(round(e.total_score)),
@@ -399,6 +462,7 @@ class ScreeningService:
                 ticker = comp.primary_ticker if comp else e.ticker
                 company_name = comp.name if comp else f"{ticker} Ltd"
                 country = comp.country.upper() if comp else "IN"
+                exchange = comp.primary_exchange.upper() if (comp and comp.primary_exchange) else primary_exchange_default
                 sector = comp.sector if comp else "General"
 
                 metric_statuses = {item.name: item.status for item in e.score_breakdown}
@@ -414,7 +478,7 @@ class ScreeningService:
                     ticker=ticker,
                     company_name=company_name,
                     country=country,
-                    exchange=primary_exchange_default,
+                    exchange=exchange,
                     sector=sector,
                     rank=rank,
                     score=int(round(e.total_score)),
@@ -451,7 +515,7 @@ class ScreeningService:
             gates_passed = sum(1 for e in evaluations if e.passed_floors and e.passed_gates)
             score_passed = len(passed_evals)
             shortlist_count = min(score_passed, 35) if score_passed > 0 else 0
-            selected_count = min(score_passed, 20) if score_passed > 0 else 0
+            selected_count = len(selected_top20_evals)
 
             funnel_record = FunnelCountRecord(
                 id=f"fnl-{run_id}",
