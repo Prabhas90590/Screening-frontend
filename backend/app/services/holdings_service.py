@@ -127,9 +127,12 @@ class HoldingsService:
 
         headers = list(raw_rows[0].keys())
         ticker_col = self._detect_column(headers, ["ticker", "symbol", "security", "securityid", "code", "isin"])
+        name_col = self._detect_column(headers, ["name", "company", "companyname", "securityname", "description"])
+        sector_col = self._detect_column(headers, ["spsector", "sector", "industry", "gicssector"])
+        mcap_col = self._detect_column(headers, ["marketcap", "mktcap", "cap"])
         shares_col = self._detect_column(headers, ["shares", "quantity", "qty", "units", "position"])
-        cost_col = self._detect_column(headers, ["costbasis", "cost", "price", "avgcost", "purchaseprice"])
-        weight_col = self._detect_column(headers, ["weight", "weightpct", "weightpercentage", "allocation", "pct"])
+        cost_col = self._detect_column(headers, ["pricepershare", "costbasis", "cost", "price", "avgcost", "purchaseprice"])
+        weight_col = self._detect_column(headers, ["allocation", "weight", "weightpct", "weightpercentage", "pct"])
 
         if not ticker_col:
             return HoldingsImportResponse(
@@ -156,25 +159,25 @@ class HoldingsService:
 
         for idx, row in enumerate(raw_rows):
             raw_id = row.get(ticker_col, "").strip()
-            if not raw_id:
-                unmatched_rows.append(
-                    UnmatchedHoldingRow(
-                        row_index=idx + 1,
-                        raw_identifier="",
-                        reason="Empty ticker value in row",
-                        raw_data=row,
-                    )
-                )
+            if not raw_id or raw_id == ",":
                 continue
 
-            # Resolve against Security Master
+            # Resolve against Security Master or auto-register new company from row metadata
             company = self._reconcile_identifier(raw_id)
+            if not company:
+                company = self._auto_register_holding(
+                    raw_id=raw_id,
+                    name=row.get(name_col) if name_col else None,
+                    sector=row.get(sector_col) if sector_col else None,
+                    market_cap_str=row.get(mcap_col) if mcap_col else None,
+                )
+
             if not company:
                 unmatched_rows.append(
                     UnmatchedHoldingRow(
                         row_index=idx + 1,
                         raw_identifier=raw_id,
-                        reason=f"Security '{raw_id}' could not be matched against Security Master",
+                        reason=f"Security '{raw_id}' could not be resolved or registered",
                         raw_data=row,
                     )
                 )
@@ -183,6 +186,9 @@ class HoldingsService:
             shares = self._safe_float(row.get(shares_col)) if shares_col else 0.0
             cost_basis = self._safe_float(row.get(cost_col)) if cost_col else 0.0
             weight = self._safe_float(row.get(weight_col)) if weight_col else 0.0
+            # If weight/allocation is a decimal fraction (e.g. 0.0125 for 1.25%), convert to percentage
+            if 0.0 < weight < 1.0:
+                weight = round(weight * 100.0, 2)
 
             holding_id = f"hld-{company.canonical_id}-{port_slug}"
             matched_records.append(
@@ -196,8 +202,9 @@ class HoldingsService:
                 )
             )
 
-        # Bulk save matched holdings into PostgreSQL
+        # Clear previous holdings and bulk save matched holdings into PostgreSQL
         if matched_records:
+            self.repo.clear_holdings(portfolio_name)
             self.repo.save_holdings_batch(matched_records)
 
         # Retrieve saved holdings with enriched company details
@@ -255,6 +262,103 @@ class HoldingsService:
                 return registered
 
         return None
+
+    def _parse_market_cap(self, val: Any) -> float:
+        if not val:
+            return 0.0
+        s = str(val).strip().replace("$", "").replace(",", "").strip()
+        multiplier = 1.0
+        if s.endswith("T") or s.endswith("t"):
+            multiplier = 1e12
+            s = s[:-1].strip()
+        elif s.endswith("B") or s.endswith("b"):
+            multiplier = 1e9
+            s = s[:-1].strip()
+        elif s.endswith("M") or s.endswith("m"):
+            multiplier = 1e6
+            s = s[:-1].strip()
+        try:
+            return float(s) * multiplier
+        except Exception:
+            return 0.0
+
+    def _auto_register_holding(
+        self,
+        raw_id: str,
+        name: Optional[str] = None,
+        sector: Optional[str] = None,
+        market_cap_str: Optional[str] = None,
+    ):
+        """Auto-register unknown security from client holding file into Security Master."""
+        from app.models.company import CompanyRecord
+        from app.models.listing import ListingRecord
+
+        raw_upper = raw_id.strip().upper()
+        # Clean ticker e.g. "NLCP", "5108 TO" -> "5108", "CA FR" -> "CA", "ZAL-XE" -> "ZAL"
+        clean_ticker = re.sub(r"[^A-Za-z0-9]", "", raw_upper.split()[0].split(".")[0].split("-")[0]) or raw_upper
+
+        country = "US"
+        exchange = "NASDAQ"
+        if " TO" in raw_upper or ".T" in raw_upper:
+            country = "JP"
+            exchange = "TSE"
+        elif " FR" in raw_upper or ".PA" in raw_upper:
+            country = "FR"
+            exchange = "Euronext Paris"
+        elif " XE" in raw_upper or ".DE" in raw_upper or "-XE" in raw_upper:
+            country = "DE"
+            exchange = "Xetra"
+        elif " OS" in raw_upper or ".OL" in raw_upper or "-OS" in raw_upper:
+            country = "NO"
+            exchange = "Oslo Børs"
+        elif " EB" in raw_upper or "-EB" in raw_upper:
+            country = "CH"
+            exchange = "SIX"
+        elif "-SG" in raw_upper or ".SI" in raw_upper:
+            country = "SG"
+            exchange = "SGX"
+        elif " BR" in raw_upper:
+            country = "BR"
+            exchange = "B3"
+        elif ".NS" in raw_upper or ".BO" in raw_upper or " IN" in raw_upper:
+            country = "IN"
+            exchange = "NSE"
+
+        canonical_id = f"comp-{country.lower()}-{clean_ticker.lower()}"
+        comp_name = name.strip() if (name and name.strip()) else f"{clean_ticker} Corporation"
+        clean_sector = sector.strip() if (sector and sector.strip()) else "General"
+        mcap = self._parse_market_cap(market_cap_str)
+        is_bank = clean_sector.lower() in ("financials", "banking", "banks", "finance")
+
+        record = CompanyRecord(
+            canonical_id=canonical_id,
+            name=comp_name,
+            primary_ticker=clean_ticker,
+            country=country,
+            primary_exchange=exchange,
+            sector=clean_sector,
+            industry=clean_sector,
+            market_cap=mcap,
+            market_cap_display=mcap,
+            display_currency="USD",
+            currency="USD",
+            is_bank=is_bank,
+            description=f"Holding auto-registered from portfolio import ({raw_id})",
+        )
+        company_repository.save_company(record)
+
+        listing_id = f"lst-{canonical_id}-{exchange.lower()}"
+        listing_rec = ListingRecord(
+            listing_id=listing_id,
+            canonical_company_id=canonical_id,
+            exchange_id=exchange.lower(),
+            ticker=clean_ticker,
+            country_id=country.lower(),
+            is_primary=True,
+            currency="USD",
+        )
+        company_repository.save_listing(listing_rec)
+        return record
 
     def add_manual_holding(self, request: CreateHoldingRequest) -> HoldingItemSchema:
         """Manually add or update a single holding in the portfolio."""
@@ -343,3 +447,4 @@ class HoldingsService:
 
 
 holdings_service = HoldingsService()
+

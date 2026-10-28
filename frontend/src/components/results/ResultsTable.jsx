@@ -1,7 +1,13 @@
 import React from 'react';
 import { useScreening } from '../../context/ScreeningContext';
 
-export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
+export const ResultsTable = ({
+  holdings = [],
+  buyCandidates = [],
+  holdingTickerSet = new Set(),
+  holdingsSubTab = 'all',
+  uploadedHoldingRows = [],
+}) => {
   const {
     securities,
     selectedSecurity,
@@ -33,6 +39,18 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
   // Filter securities by primary tab and sub-pills
   const tabSecurities = React.useMemo(() => {
     if (resultsTab === 'myHoldings') {
+      if (holdingsSubTab === 'top20') {
+        return holdings.filter((h) => h.comparisonStatus === 'held_in_top20');
+      }
+      if (holdingsSubTab === 'exited') {
+        return holdings.filter((h) => h.comparisonStatus === 'held_exited');
+      }
+      if (holdingsSubTab === 'unscreened') {
+        return holdings.filter((h) => h.comparisonStatus === 'held_unscreened');
+      }
+      if (holdingsSubTab === 'buyIdeas') {
+        return buyCandidates || [];
+      }
       return holdings || [];
     }
 
@@ -67,10 +85,24 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
     }
 
     // Default: 'top20' (only actively qualified top 20 securities)
-    return securities.filter(
-      (s) => (s.stageStatus === 'passed' && s.rank <= 20) || (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited')
-    );
-  }, [resultsTab, changesSubTab, nearMissSubTab, securities, holdings]);
+    return securities
+      .filter(
+        (s) =>
+          (s.stageStatus === 'passed' && s.rank <= 20) ||
+          (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited')
+      )
+      .map((s) => {
+        const isHeld = holdingTickerSet?.has(s.ticker?.toUpperCase());
+        const holdingMatch = isHeld
+          ? (holdings || []).find((h) => h.ticker?.toUpperCase() === s.ticker?.toUpperCase())
+          : null;
+        return {
+          ...s,
+          isHeld,
+          holdingWeight: holdingMatch?.weightPct,
+        };
+      });
+  }, [resultsTab, changesSubTab, nearMissSubTab, holdingsSubTab, securities, holdings, buyCandidates, holdingTickerSet]);
 
   // Secondary filters: sector, region, cap, and search query
   const filteredSecurities = React.useMemo(() => {
@@ -98,71 +130,22 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
     });
   }, [tabSecurities, filterSector, filterRegion, filterCap, searchQuery]);
 
-  // Empty states per tab
-  const emptyStateByTab = {
-    allScreened: {
-      title: 'No Screened Securities Found',
-      description: 'Run an instant screen or adjust search filters to view evaluated equities.',
-    },
-    top20: {
-      title: 'No Top 20 Securities Found',
-      description: 'Adjust your sector, region, or search filters to view top qualifying companies.',
-    },
-    changes: {
-      title: 'No Portfolio Turnover in This Run',
-      description: 'No securities entered or exited between the selected runs.',
-    },
-    nearMisses: {
-      title: 'No Near Misses Found',
-      description: 'No securities fell immediately outside the cutoff rank or rule thresholds.',
-    },
-    myHoldings: {
-      title: 'No Holdings Uploaded',
-      description: 'Upload a CSV file containing your portfolio tickers to compare against screening results.',
-    },
-  };
-
-  // Render My Holdings Table if user uploaded a file
-  if (resultsTab === 'myHoldings' && uploadedHoldingRows && uploadedHoldingRows.length > 0) {
-    const columns = Object.keys(uploadedHoldingRows[0]);
-    return (
-      <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-2xs">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-xs">
-            <thead>
-              <tr className="border-b border-slate-200/80 bg-slate-50/70 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                {columns.map((column) => (
-                  <th key={column} className="whitespace-nowrap px-3.5 py-3">{column}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {uploadedHoldingRows.map((row, rowIndex) => (
-                <tr key={`holding-${rowIndex}`} className="hover:bg-slate-50/80 transition-colors">
-                  {columns.map((column) => (
-                    <td key={`${rowIndex}-${column}`} className="whitespace-nowrap px-3.5 py-3 text-slate-700 font-medium">
-                      {row[column] || '—'}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  }
-
   // Empty state rendering
   if (filteredSecurities.length === 0) {
-    const emptyState = emptyStateByTab[resultsTab] || emptyStateByTab.top20;
+    let emptyTitle = 'No Securities Found';
+    let emptyDesc = 'Adjust your sector, region, or search filters to view qualifying companies.';
+
+    if (resultsTab === 'myHoldings') {
+      emptyTitle = 'No Holdings in This View';
+      emptyDesc = holdings.length === 0
+        ? 'No holdings have been imported yet. Click "Upload holdings file" above to import your client portfolio.'
+        : 'No holdings match the selected portfolio sub-filter or search criteria.';
+    }
+
     return (
-      <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-2xs">
-        <div className="text-2xl mb-2">🔍</div>
-        <h3 className="text-sm font-bold text-slate-800">{emptyState.title}</h3>
-        <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-slate-500">
-          {emptyState.description}
-        </p>
+      <div className="bg-white rounded-xl border border-slate-200/90 p-12 text-center shadow-2xs">
+        <p className="text-sm font-semibold text-slate-700">{emptyTitle}</p>
+        <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">{emptyDesc}</p>
       </div>
     );
   }
@@ -178,8 +161,12 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
                 <th className="py-3 px-3.5 min-w-[200px]">Security &amp; Ticker</th>
                 <th className="py-3 px-3.5 whitespace-nowrap">Sector</th>
                 <th className="py-3 px-3.5 whitespace-nowrap">Score</th>
-                <th className="py-3 px-3.5 whitespace-nowrap">Movement</th>
-                <th className="py-3 px-3.5 min-w-[220px]">Cause / Attribution</th>
+                <th className="py-3 px-3.5 whitespace-nowrap">
+                  {resultsTab === 'myHoldings' ? 'Model Verdict' : 'Movement'}
+                </th>
+                <th className="py-3 px-3.5 min-w-[230px]">
+                  {resultsTab === 'myHoldings' ? 'Portfolio vs Screening Attribution' : 'Cause / Attribution'}
+                </th>
                 <th className="py-3 px-3.5 whitespace-nowrap">Key Valuation</th>
                 <th className="py-3 px-3.5 text-center whitespace-nowrap">Decision</th>
               </tr>
@@ -201,8 +188,12 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
                     className={`cursor-pointer transition-colors hover:bg-slate-50/90 ${
                       isSelected
                         ? 'bg-teal-50/60 border-l-4 border-[#147b73]'
-                        : isExited
+                        : item.comparisonStatus === 'held_in_top20'
+                        ? 'bg-emerald-50/20'
+                        : item.comparisonStatus === 'held_exited' || isExited
                         ? 'bg-rose-50/30'
+                        : item.isBuyCandidate
+                        ? 'bg-indigo-50/20'
                         : isNew
                         ? 'bg-amber-50/20'
                         : ''
@@ -210,12 +201,12 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
                   >
                     {/* 1. Rank */}
                     <td className="py-3.5 px-3.5 text-center text-slate-500 font-mono text-[11px] whitespace-nowrap">
-                      {item.rank !== null ? (
+                      {item.rank !== null && item.rank !== undefined ? (
                         <span className="font-semibold text-slate-700">#{item.rank}</span>
                       ) : item.prevRank ? (
                         <span className="text-rose-500 line-through">#{item.prevRank}</span>
                       ) : (
-                        '—'
+                        <span className="text-slate-400">—</span>
                       )}
                     </td>
 
@@ -224,7 +215,7 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
                       <div className="font-bold text-slate-900 leading-snug">
                         {item.name}
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 font-medium">
+                      <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 font-medium flex-wrap">
                         <span className="font-mono font-semibold text-slate-600">{item.ticker}</span>
                         <span>·</span>
                         <span>{item.country}</span>
@@ -232,6 +223,14 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
                           <>
                             <span>·</span>
                             <span className="text-slate-400">{item.exchange}</span>
+                          </>
+                        )}
+                        {item.isHolding && (item.weightPct > 0 || item.shares > 0) && (
+                          <>
+                            <span>·</span>
+                            <span className="font-semibold text-teal-700 bg-teal-50 px-1.5 py-0.2 rounded border border-teal-200/60">
+                              {item.weightPct > 0 ? `${item.weightPct}% weight` : `${item.shares.toLocaleString()} shs`}
+                            </span>
                           </>
                         )}
                       </div>
@@ -248,7 +247,7 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
                     <td className="py-3.5 px-3.5 whitespace-nowrap">
                       <div className="flex items-baseline gap-1.5">
                         <span className="text-sm font-bold text-slate-900 font-mono">
-                          {item.score}
+                          {item.score !== undefined && item.score !== null ? item.score : '—'}
                         </span>
                         {scoreDelta !== null && scoreDelta !== 0 && (
                           <span
@@ -264,9 +263,35 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
                       </div>
                     </td>
 
-                    {/* 5. Movement / Status */}
+                    {/* 5. Movement / Model Verdict */}
                     <td className="py-3.5 px-3.5 whitespace-nowrap">
-                      {isNew ? (
+                      {item.isBuyCandidate ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-800">
+                          ★ BUY IDEA
+                        </span>
+                      ) : resultsTab === 'myHoldings' && item.isHolding ? (
+                        item.comparisonStatus === 'held_in_top20' ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                            🏆 TOP 20 (#{item.rank})
+                          </span>
+                        ) : item.comparisonStatus === 'held_exited' ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                            ▼ EXITED MODEL
+                          </span>
+                        ) : item.comparisonStatus === 'held_rank_miss' ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                            ⚠️ RANK MISS (#{item.rank})
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                            ○ UNSCREENED
+                          </span>
+                        )
+                      ) : resultsTab === 'top20' && item.isHeld ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 border border-teal-200 px-2 py-0.5 text-[10px] font-bold text-teal-800">
+                          💼 HELD ({item.holdingWeight ? `${item.holdingWeight}%` : 'Held'})
+                        </span>
+                      ) : isNew ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
                           ★ NEW
                         </span>
@@ -289,8 +314,30 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
 
                     {/* 6. Cause / Attribution Badge */}
                     <td className="py-3.5 px-3.5">
-                      <div className="text-[11px] font-medium" title={item.movementReason}>
-                        {item.movementReason ? (
+                      <div className="text-[11px] font-medium">
+                        {item.isBuyCandidate ? (
+                          <span className="inline-block rounded-md px-2.5 py-1 text-[11px] font-medium leading-relaxed bg-indigo-50 text-indigo-800 border border-indigo-200/70">
+                            Top 20 Model Pick · Fresh idea not currently in client holdings
+                          </span>
+                        ) : resultsTab === 'myHoldings' && item.isHolding ? (
+                          item.comparisonStatus === 'held_in_top20' ? (
+                            <span className="inline-block rounded-md px-2.5 py-1 text-[11px] font-medium leading-relaxed bg-emerald-50 text-emerald-800 border border-emerald-200/70">
+                              Core Winner: Rank #{item.rank} · Score {item.score}/100 · Allocation: {item.weightPct}%
+                            </span>
+                          ) : item.comparisonStatus === 'held_exited' ? (
+                            <span className="inline-block rounded-md px-2.5 py-1 text-[11px] font-medium leading-relaxed bg-rose-50 text-rose-800 border border-rose-200/70">
+                              {item.movementReason || 'Failed knockout gates'} · Allocation: {item.weightPct}%
+                            </span>
+                          ) : item.comparisonStatus === 'held_rank_miss' ? (
+                            <span className="inline-block rounded-md px-2.5 py-1 text-[11px] font-medium leading-relaxed bg-amber-50 text-amber-800 border border-amber-200/70">
+                              {item.movementReason || 'Ranked outside Top 20 cutoff'} · Allocation: {item.weightPct}%
+                            </span>
+                          ) : (
+                            <span className="inline-block rounded-md px-2.5 py-1 text-[11px] font-medium leading-relaxed bg-slate-50 text-slate-600 border border-slate-200/60">
+                              Not evaluated in current regional run · Allocation: {item.weightPct}%
+                            </span>
+                          )
+                        ) : item.movementReason ? (
                           <span
                             className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-medium leading-relaxed ${
                               isNew
@@ -308,7 +355,7 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
                       </div>
                     </td>
 
-                    {/* 7. Key Valuation (P/E & EV/EBITDA combined) */}
+                    {/* 7. Key Valuation */}
                     <td className="py-3.5 px-3.5 whitespace-nowrap">
                       <div className="font-mono text-slate-800 font-medium">
                         {item.fwdPe ? `${item.fwdPe}x P/E` : '—'}
@@ -328,6 +375,7 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
                         <button
                           type="button"
                           onClick={() => setSecurityDecision(item.id, 'keep')}
+                          title="Mark position to keep in portfolio"
                           className={`px-2.5 py-1 text-[11px] font-bold rounded transition-colors cursor-pointer ${
                             item.decision === 'keep'
                               ? 'bg-[#147b73] text-white shadow-2xs'
@@ -339,6 +387,7 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
                         <button
                           type="button"
                           onClick={() => setSecurityDecision(item.id, 'drop')}
+                          title="Mark position to divest / trim"
                           className={`px-2.5 py-1 text-[11px] font-bold rounded transition-colors cursor-pointer ${
                             item.decision === 'drop'
                               ? 'bg-rose-600 text-white shadow-2xs'
@@ -360,10 +409,10 @@ export const ResultsTable = ({ holdings, uploadedHoldingRows }) => {
       {/* Helpful Hint */}
       <div className="flex items-center justify-between text-[11px] text-slate-500 px-1 py-1">
         <span>
-          💡 <strong>Tip:</strong> Click any company row to inspect all 16 metrics, rule comparisons, and score breakdown in the right drawer.
+          💡 <strong>Tip:</strong> Click any security row to inspect knockout gates, quality breakdown, and record your Keep / Drop rationale in the drawer.
         </span>
         <span className="font-medium text-slate-600">
-          Showing {filteredSecurities.length} {filteredSecurities.length === 1 ? 'company' : 'companies'}
+          Showing {filteredSecurities.length} {resultsTab === 'myHoldings' ? 'portfolio positions' : 'screened securities'}
         </span>
       </div>
     </div>

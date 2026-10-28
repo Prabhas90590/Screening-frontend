@@ -10,6 +10,7 @@ import { useScreening } from '../../context/ScreeningContext';
 
 export const ResultsView = () => {
   const { selectedSecurity, resultsTab, securities } = useScreening();
+  const [holdingsSubTab, setHoldingsSubTab] = React.useState('all');
   const holdingsImport = useHoldingsImport(securities);
 
   return (
@@ -22,11 +23,16 @@ export const ResultsView = () => {
         {/* 2. 4 Clean Tabs (Top 20, Changes, Near Misses, My Holdings) & Sub-Pills */}
         <ResultsFilterBar
           {...holdingsImport}
+          holdingsSubTab={holdingsSubTab}
+          setHoldingsSubTab={setHoldingsSubTab}
           exportResults={() => exportResultsToCsv(securities)}
         />
 
         {/* 3. Streamlined 7-Column Results Table */}
-        <ResultsTable {...holdingsImport} />
+        <ResultsTable
+          {...holdingsImport}
+          holdingsSubTab={holdingsSubTab}
+        />
 
         {/* 4. Results Legend / Footnote */}
         <ResultsLegend />

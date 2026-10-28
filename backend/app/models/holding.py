@@ -25,3 +25,4 @@ class HoldingWithDetails(HoldingRecord):
     sector: str = Field(default="Unclassified", description="GICS sector")
     market_cap_display: Optional[float] = None
     price_usd: Optional[float] = None
+

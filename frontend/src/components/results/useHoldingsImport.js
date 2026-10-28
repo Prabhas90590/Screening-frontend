@@ -131,11 +131,31 @@ export const useHoldingsImport = (securities = []) => {
         // Check if this holding is present in current screening run
         const screenedMatch = securities.find(
           (s) =>
-            s.id === ph.canonical_company_id ||
-            s.ticker?.toLowerCase() === ph.ticker?.toLowerCase()
+            (s.id && ph.canonical_company_id && s.id === ph.canonical_company_id) ||
+            (s.ticker && ph.ticker && s.ticker.toUpperCase() === ph.ticker.toUpperCase())
         );
 
         if (screenedMatch) {
+          const isTop20 = (screenedMatch.rank && screenedMatch.rank <= 20) || 
+                          (screenedMatch.stageStatus === 'passed' && screenedMatch.rank <= 20);
+          const isRankNearMiss = screenedMatch.nearMissStatus === 'rank_near_miss' || 
+                                (screenedMatch.rank && screenedMatch.rank > 20 && screenedMatch.stageStatus === 'passed');
+          const isExited = screenedMatch.stageStatus !== 'passed' || screenedMatch.deltaStatus === 'exited';
+
+          let comparisonStatus = 'held_in_top20';
+          let comparisonVerdict = `🏆 Top 20 (#${screenedMatch.rank})`;
+          let recommendedAction = 'Keep';
+
+          if (isExited) {
+            comparisonStatus = 'held_exited';
+            comparisonVerdict = '▼ Exited Model';
+            recommendedAction = 'Drop';
+          } else if (isRankNearMiss) {
+            comparisonStatus = 'held_rank_miss';
+            comparisonVerdict = `⚠️ Rank Near-Miss (#${screenedMatch.rank})`;
+            recommendedAction = 'Review';
+          }
+
           return {
             ...screenedMatch,
             shares: ph.shares,
@@ -143,10 +163,13 @@ export const useHoldingsImport = (securities = []) => {
             weightPct: ph.weight_pct,
             portfolioName: ph.portfolio_name,
             isHolding: true,
+            comparisonStatus,
+            comparisonVerdict,
+            recommendedAction,
           };
         }
 
-        // Return holding item with fallback display fields
+        // Return holding item with fallback display fields (Unscreened in current regional run)
         return {
           id: ph.canonical_company_id || ph.holding_id,
           name: ph.name || ph.ticker,
@@ -155,7 +178,7 @@ export const useHoldingsImport = (securities = []) => {
           exchange: ph.exchange || 'NYSE',
           sector: ph.sector || 'Unclassified',
           score: '—',
-          rank: '—',
+          rank: null,
           fwdPe: null,
           peg: null,
           evEbitda: null,
@@ -164,15 +187,48 @@ export const useHoldingsImport = (securities = []) => {
           weightPct: ph.weight_pct,
           portfolioName: ph.portfolio_name,
           isHolding: true,
+          comparisonStatus: 'held_unscreened',
+          comparisonVerdict: '○ Unscreened in this Run',
+          recommendedAction: 'Hold',
           stageStatus: 'holding',
-          deltaStatus: 'retained',
+          deltaStatus: 'unscreened',
         };
       })
-    : securities.filter((security) => holdingIds.includes(security.id));
+    : [];
+
+  const holdingTickerSet = new Set(
+    (persistentHoldings || []).map((h) => h.ticker?.toUpperCase()).filter(Boolean)
+  );
+
+  // Top 20 model winners that the client DOES NOT currently own
+  const buyCandidates = securities
+    .filter(
+      (s) =>
+        ((s.rank && s.rank <= 20) || (s.stageStatus === 'passed' && s.rank <= 20)) &&
+        !holdingTickerSet.has(s.ticker?.toUpperCase())
+    )
+    .map((s) => ({
+      ...s,
+      isBuyCandidate: true,
+      comparisonStatus: 'buy_candidate',
+      comparisonVerdict: '★ Top 20 Buy Idea (Not Held)',
+      recommendedAction: 'Buy',
+    }));
+
+  const top20HeldCount = displayedHoldings.filter((h) => h.comparisonStatus === 'held_in_top20').length;
+  const rankMissHeldCount = displayedHoldings.filter((h) => h.comparisonStatus === 'held_rank_miss').length;
+  const exitedHeldCount = displayedHoldings.filter((h) => h.comparisonStatus === 'held_exited').length;
+  const unscreenedHeldCount = displayedHoldings.filter((h) => h.comparisonStatus === 'held_unscreened').length;
 
   return {
     holdings: displayedHoldings,
     persistentHoldings,
+    buyCandidates,
+    top20HeldCount,
+    rankMissHeldCount,
+    exitedHeldCount,
+    unscreenedHeldCount,
+    holdingTickerSet,
     uploadedHoldingRows,
     uploadHoldingsFile,
     holdingsUploadError,

@@ -59,3 +59,4 @@ class HoldingsSummary(BaseModel):
     sectors_represented: List[str] = Field(default_factory=list)
     countries_represented: List[str] = Field(default_factory=list)
     holdings: List[HoldingItemSchema] = Field(default_factory=list)
+

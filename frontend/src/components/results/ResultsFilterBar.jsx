@@ -3,6 +3,12 @@ import { useScreening } from '../../context/ScreeningContext';
 
 export const ResultsFilterBar = ({
   holdings = [],
+  buyCandidates = [],
+  top20HeldCount = 0,
+  exitedHeldCount = 0,
+  unscreenedHeldCount = 0,
+  holdingsSubTab = 'all',
+  setHoldingsSubTab,
   uploadHoldingsFile,
   holdingsUploadError,
   holdingsUploadSummary,
@@ -39,9 +45,13 @@ export const ResultsFilterBar = ({
     (s) => s.nearMissStatus === 'rule_near_miss' || s.nearMissStatus === 'rank_near_miss' || s.deltaStatus === 'rule_miss'
   ).length;
 
-  const enteredCount = securities.filter((s) => s.deltaStatus === 'entered').length;
-  const exitedCount = securities.filter((s) => s.deltaStatus === 'exited').length;
-  const totalChanges = enteredCount + exitedCount;
+  const enteredCount = securities.filter(
+    (s) => s.deltaStatus === 'entered' || s.rankDelta === 'NEW'
+  ).length;
+
+  const exitedCount = securities.filter(
+    (s) => s.deltaStatus === 'exited' || s.rankDelta === 'EXITED'
+  ).length;
 
   const tabs = [
     { id: 'top20', label: `🏆 Top 20 (${top20Count})` },
@@ -53,7 +63,7 @@ export const ResultsFilterBar = ({
 
   return (
     <div className="space-y-3">
-      {/* 4 Clean Primary Tabs */}
+      {/* 5 Clean Primary Tabs */}
       <div className="flex items-center justify-between border-b border-slate-200 overflow-x-auto pb-0.5">
         <div className="flex space-x-6 sm:space-x-8 shrink-0">
           {tabs.map((tab) => {
@@ -95,7 +105,7 @@ export const ResultsFilterBar = ({
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            All Changes ({totalChanges})
+            All Changes ({enteredCount + exitedCount})
           </button>
           <button
             type="button"
@@ -162,29 +172,93 @@ export const ResultsFilterBar = ({
         </div>
       )}
 
-      {/* Holdings Upload Bar */}
+      {/* Holdings Upload Bar & Portfolio Comparison Sub-Pills */}
       {resultsTab === 'myHoldings' && (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-          <label className="cursor-pointer rounded-md bg-[#147b73] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0f675f]">
-            Upload holdings file
-            <input
-              type="file"
-              accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="hidden"
-              onChange={(event) => {
-                uploadHoldingsFile(event.target.files?.[0]);
-                event.target.value = '';
-              }}
-            />
-          </label>
-          <span className="text-[11px] text-slate-500">
-            Supported files: CSV, XLS, XLSX
-          </span>
-          {holdingsUploadSummary && (
-            <span className="text-[11px] font-medium text-[#147b73]">{holdingsUploadSummary}</span>
-          )}
-          {holdingsUploadError && (
-            <span className="text-[11px] font-medium text-red-600">{holdingsUploadError}</span>
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+            <label className="cursor-pointer rounded-md bg-[#147b73] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0f675f]">
+              Upload holdings file
+              <input
+                type="file"
+                accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="hidden"
+                onChange={(event) => {
+                  uploadHoldingsFile(event.target.files?.[0]);
+                  event.target.value = '';
+                }}
+              />
+            </label>
+            <span className="text-[11px] text-slate-500">
+              Supported files: CSV, XLS, XLSX (Upload replaces previous holdings)
+            </span>
+            {holdingsUploadSummary && (
+              <span className="text-[11px] font-medium text-[#147b73]">{holdingsUploadSummary}</span>
+            )}
+            {holdingsUploadError && (
+              <span className="text-[11px] font-medium text-red-600">{holdingsUploadError}</span>
+            )}
+          </div>
+
+          {/* Sub-pills for Portfolio vs Screening Model Comparison */}
+          {holdings && holdings.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 pt-0.5 pb-0.5">
+              <span className="text-xs text-slate-500 font-semibold mr-1">Portfolio Comparison:</span>
+              <button
+                type="button"
+                onClick={() => setHoldingsSubTab && setHoldingsSubTab('all')}
+                className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
+                  (holdingsSubTab || 'all') === 'all'
+                    ? 'bg-slate-800 text-white shadow-2xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                All Holdings ({holdings.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHoldingsSubTab && setHoldingsSubTab('top20')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
+                  holdingsSubTab === 'top20'
+                    ? 'bg-[#147b73] text-white shadow-2xs'
+                    : 'bg-teal-50 text-[#147b73] border border-teal-200 hover:bg-teal-100'
+                }`}
+              >
+                🏆 In Top 20 ({top20HeldCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHoldingsSubTab && setHoldingsSubTab('exited')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
+                  holdingsSubTab === 'exited'
+                    ? 'bg-rose-600 text-white shadow-2xs'
+                    : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'
+                }`}
+              >
+                ▼ Exited Model ({exitedHeldCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHoldingsSubTab && setHoldingsSubTab('unscreened')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
+                  holdingsSubTab === 'unscreened'
+                    ? 'bg-slate-600 text-white shadow-2xs'
+                    : 'bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200'
+                }`}
+              >
+                ○ Unscreened Market ({unscreenedHeldCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHoldingsSubTab && setHoldingsSubTab('buyIdeas')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
+                  holdingsSubTab === 'buyIdeas'
+                    ? 'bg-indigo-600 text-white shadow-2xs'
+                    : 'bg-indigo-50 text-indigo-800 border border-indigo-200 hover:bg-indigo-100'
+                }`}
+              >
+                ★ Top 20 Buy Ideas ({buyCandidates.length})
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -274,4 +348,3 @@ export const ResultsFilterBar = ({
     </div>
   );
 };
-

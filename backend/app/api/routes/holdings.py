@@ -131,3 +131,4 @@ def clear_portfolio(portfolio_name: Optional[str] = None):
         "portfolio_name": portfolio_name or "All",
         "cleared_count": count,
     }
+
