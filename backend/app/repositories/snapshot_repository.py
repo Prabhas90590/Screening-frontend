@@ -92,6 +92,100 @@ class SnapshotRepository:
         finally:
             conn.close()
 
+    def save_financial_snapshots_batch(self, records: List[FinancialSnapshotRecord]) -> int:
+        """Bulk insert financial snapshots with de-duplication."""
+        if not records:
+            return 0
+        conn = db_manager.get_connection()
+        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
+        deduped = list({r.id: r for r in records}.values())
+        try:
+            cursor = conn.cursor()
+            if is_postgres:
+                from psycopg2.extras import execute_values
+                pg_sql = """
+                    INSERT INTO financial_snapshots (
+                        id, canonical_company_id, as_of_date, currency,
+                        ebitda, net_debt, total_debt, cash, revenue,
+                        operating_income, net_income, free_cash_flow, created_at
+                    ) VALUES %s
+                    ON CONFLICT (id) DO UPDATE SET
+                        ebitda = EXCLUDED.ebitda,
+                        net_debt = EXCLUDED.net_debt,
+                        total_debt = EXCLUDED.total_debt,
+                        cash = EXCLUDED.cash,
+                        revenue = EXCLUDED.revenue,
+                        operating_income = EXCLUDED.operating_income,
+                        net_income = EXCLUDED.net_income,
+                        free_cash_flow = EXCLUDED.free_cash_flow;
+                """
+                tuples = [
+                    (
+                        r.id, r.canonical_company_id, r.as_of_date, r.currency,
+                        r.ebitda, r.net_debt, r.total_debt, r.cash, r.revenue,
+                        r.operating_income, r.net_income, r.free_cash_flow, r.created_at
+                    )
+                    for r in deduped
+                ]
+                execute_values(cursor, pg_sql, tuples, page_size=1000)
+            else:
+                for r in deduped:
+                    self.save_financial_snapshot(r)
+            conn.commit()
+            return len(deduped)
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to bulk save financial snapshots: {e}")
+            raise
+        finally:
+            conn.close()
+
+    def save_estimate_snapshots_batch(self, records: List[EstimateSnapshotRecord]) -> int:
+        """Bulk insert estimate snapshots with de-duplication."""
+        if not records:
+            return 0
+        conn = db_manager.get_connection()
+        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
+        deduped = list({r.id: r for r in records}.values())
+        try:
+            cursor = conn.cursor()
+            if is_postgres:
+                from psycopg2.extras import execute_values
+                pg_sql = """
+                    INSERT INTO estimate_snapshots (
+                        id, canonical_company_id, as_of_date,
+                        forward_pe, peg_ratio, eps_growth_fwd, analyst_count,
+                        target_price, recommendation_mean, created_at
+                    ) VALUES %s
+                    ON CONFLICT (id) DO UPDATE SET
+                        forward_pe = EXCLUDED.forward_pe,
+                        peg_ratio = EXCLUDED.peg_ratio,
+                        eps_growth_fwd = EXCLUDED.eps_growth_fwd,
+                        analyst_count = EXCLUDED.analyst_count,
+                        target_price = EXCLUDED.target_price,
+                        recommendation_mean = EXCLUDED.recommendation_mean;
+                """
+                tuples = [
+                    (
+                        r.id, r.canonical_company_id, r.as_of_date,
+                        r.forward_pe, r.peg_ratio, r.eps_growth_fwd, r.analyst_count,
+                        r.target_price, r.recommendation_mean, r.created_at
+                    )
+                    for r in deduped
+                ]
+                execute_values(cursor, pg_sql, tuples, page_size=1000)
+            else:
+                for r in deduped:
+                    self.save_estimate_snapshot(r)
+            conn.commit()
+            return len(deduped)
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to bulk save estimate snapshots: {e}")
+            raise
+        finally:
+            conn.close()
+
     def get_financial_snapshots_by_company(self, canonical_company_id: str) -> List[FinancialSnapshotRecord]:
         """Fetch all historical financial snapshots for a canonical company."""
         conn = db_manager.get_connection()

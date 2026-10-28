@@ -144,6 +144,79 @@ class CompanyMetricsRepository:
         finally:
             conn.close()
 
+    def save_metrics_batch(self, records: List[CompanyMetricsRecord]) -> int:
+        """Bulk insert or update company metrics records in a single database round-trip."""
+        if not records:
+            return 0
+        conn = db_manager.get_connection()
+        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
+
+        # De-duplicate by canonical_company_id to avoid PostgreSQL CardinalityViolation
+        deduped = list({r.canonical_company_id: r for r in records}.values())
+
+        try:
+            cursor = conn.cursor()
+            if is_postgres:
+                from psycopg2.extras import execute_values
+                pg_sql = """
+                    INSERT INTO company_metrics (
+                        canonical_company_id, ticker, as_of_date,
+                        market_cap_usd, price_usd, avg_daily_volume, avg_daily_traded_value,
+                        forward_pe, pe_vs_benchmark, peg_ratio, ev_ebitda, price_to_sales, price_to_cash_flow,
+                        revenue_growth_fwd, eps_growth_fwd, beta, net_debt_ebitda, dividend_yield,
+                        revenue, ebitda, total_debt, cash, net_debt,
+                        data_confidence, created_at, updated_at
+                    ) VALUES %s
+                    ON CONFLICT (canonical_company_id) DO UPDATE SET
+                        ticker = EXCLUDED.ticker,
+                        as_of_date = EXCLUDED.as_of_date,
+                        market_cap_usd = EXCLUDED.market_cap_usd,
+                        price_usd = EXCLUDED.price_usd,
+                        avg_daily_volume = EXCLUDED.avg_daily_volume,
+                        avg_daily_traded_value = EXCLUDED.avg_daily_traded_value,
+                        forward_pe = EXCLUDED.forward_pe,
+                        pe_vs_benchmark = EXCLUDED.pe_vs_benchmark,
+                        peg_ratio = EXCLUDED.peg_ratio,
+                        ev_ebitda = EXCLUDED.ev_ebitda,
+                        price_to_sales = EXCLUDED.price_to_sales,
+                        price_to_cash_flow = EXCLUDED.price_to_cash_flow,
+                        revenue_growth_fwd = EXCLUDED.revenue_growth_fwd,
+                        eps_growth_fwd = EXCLUDED.eps_growth_fwd,
+                        beta = EXCLUDED.beta,
+                        net_debt_ebitda = EXCLUDED.net_debt_ebitda,
+                        dividend_yield = EXCLUDED.dividend_yield,
+                        revenue = EXCLUDED.revenue,
+                        ebitda = EXCLUDED.ebitda,
+                        total_debt = EXCLUDED.total_debt,
+                        cash = EXCLUDED.cash,
+                        net_debt = EXCLUDED.net_debt,
+                        data_confidence = EXCLUDED.data_confidence,
+                        updated_at = EXCLUDED.updated_at;
+                """
+                tuples = [
+                    (
+                        r.canonical_company_id, r.ticker, r.as_of_date,
+                        r.market_cap_usd, r.price_usd, r.avg_daily_volume, r.avg_daily_traded_value,
+                        r.forward_pe, r.pe_vs_benchmark, r.peg_ratio, r.ev_ebitda, r.price_to_sales, r.price_to_cash_flow,
+                        r.revenue_growth_fwd, r.eps_growth_fwd, r.beta, r.net_debt_ebitda, r.dividend_yield,
+                        r.revenue, r.ebitda, r.total_debt, r.cash, r.net_debt,
+                        r.data_confidence, r.created_at, r.updated_at
+                    )
+                    for r in deduped
+                ]
+                execute_values(cursor, pg_sql, tuples, page_size=1000)
+            else:
+                for r in deduped:
+                    self.save_metrics(r)
+            conn.commit()
+            return len(deduped)
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to bulk save company metrics: {e}")
+            raise
+        finally:
+            conn.close()
+
     def get_metrics(self, canonical_company_id: str) -> Optional[CompanyMetricsRecord]:
         """Fetch calculated metrics for a company by canonical ID."""
         conn = db_manager.get_connection()

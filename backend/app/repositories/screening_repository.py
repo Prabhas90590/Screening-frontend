@@ -81,6 +81,7 @@ class ScreeningRepository:
             run.error_message,
         )
 
+
         try:
             cursor = conn.cursor()
             cursor.execute(insert_sql, values)
@@ -98,6 +99,8 @@ class ScreeningRepository:
         conn = db_manager.get_connection()
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
         query = "SELECT * FROM screening_runs WHERE run_id = %s" if is_postgres else "SELECT * FROM screening_runs WHERE run_id = ?"
+
+        # De-duplicate by id to avoid PostgreSQL CardinalityViolation
 
         try:
             cursor = conn.cursor()
@@ -138,6 +141,8 @@ class ScreeningRepository:
             ORDER BY r.started_at DESC
             LIMIT ?
         """
+
+        # De-duplicate by id to avoid PostgreSQL CardinalityViolation
 
         try:
             cursor = conn.cursor()
@@ -198,6 +203,8 @@ class ScreeningRepository:
             created_at_val,
         )
 
+        # De-duplicate by id to avoid PostgreSQL CardinalityViolation
+
         try:
             cursor = conn.cursor()
             cursor.execute(insert_sql, values)
@@ -215,6 +222,8 @@ class ScreeningRepository:
         conn = db_manager.get_connection()
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
         query = "SELECT * FROM funnel_counts WHERE run_id = %s" if is_postgres else "SELECT * FROM funnel_counts WHERE run_id = ?"
+
+        # De-duplicate by id to avoid PostgreSQL CardinalityViolation
 
         try:
             cursor = conn.cursor()
@@ -297,48 +306,107 @@ class ScreeningRepository:
                 market_cap_display = excluded.market_cap_display;
         """
 
+        # De-duplicate by id to avoid PostgreSQL CardinalityViolation
+        deduped_results = list({r.id: r for r in results}.values())
+
         try:
             cursor = conn.cursor()
-            for r in results:
-                score_json = json.dumps(r.score_breakdown)
-                metric_json = json.dumps(r.metric_statuses)
-                created_at_val = r.created_at if is_postgres else r.created_at.isoformat()
-
-                values = (
-                    r.id,
-                    r.run_id,
-                    r.canonical_company_id,
-                    r.ticker,
-                    r.company_name,
-                    r.country,
-                    r.exchange,
-                    r.sector,
-                    r.rank,
-                    r.score,
-                    r.display_price,
-                    r.market_cap_display,
-                    r.display_currency,
-                    r.fwd_pe,
-                    r.peg,
-                    r.ev_ebitda,
-                    r.beta,
-                    r.nd_ebitda,
-                    r.yield_pct,
-                    r.eps_growth_pct,
-                    r.pe_vs_benchmark,
-                    r.price_to_sales,
-                    r.price_to_cash_flow,
-                    r.revenue_growth_fwd,
-                    r.avg_daily_volume,
-                    r.avg_daily_traded_value,
-                    r.data_confidence,
-                    r.stage_status,
-                    r.near_miss_status,
-                    score_json,
-                    metric_json,
-                    created_at_val,
-                )
-                cursor.execute(insert_sql, values)
+            if is_postgres:
+                from psycopg2.extras import execute_values
+                pg_insert_sql = """
+                    INSERT INTO screening_results (
+                        id, run_id, canonical_company_id, ticker, company_name,
+                        country, exchange, sector, rank, score,
+                        display_price, market_cap_display, display_currency,
+                        fwd_pe, peg, ev_ebitda, beta, nd_ebitda, yield_pct, eps_growth_pct,
+                        pe_vs_benchmark, price_to_sales, price_to_cash_flow, revenue_growth_fwd, avg_daily_volume, avg_daily_traded_value,
+                        data_confidence, stage_status, near_miss_status,
+                        score_breakdown, metric_statuses, created_at
+                    ) VALUES %s
+                    ON CONFLICT (id) DO UPDATE SET
+                        rank = EXCLUDED.rank,
+                        score = EXCLUDED.score,
+                        display_price = EXCLUDED.display_price,
+                        market_cap_display = EXCLUDED.market_cap_display;
+                """
+                value_tuples = [
+                    (
+                        r.id,
+                        r.run_id,
+                        r.canonical_company_id,
+                        r.ticker,
+                        r.company_name,
+                        r.country,
+                        r.exchange,
+                        r.sector,
+                        r.rank,
+                        r.score,
+                        r.display_price,
+                        r.market_cap_display,
+                        r.display_currency,
+                        r.fwd_pe,
+                        r.peg,
+                        r.ev_ebitda,
+                        r.beta,
+                        r.nd_ebitda,
+                        r.yield_pct,
+                        r.eps_growth_pct,
+                        r.pe_vs_benchmark,
+                        r.price_to_sales,
+                        r.price_to_cash_flow,
+                        r.revenue_growth_fwd,
+                        r.avg_daily_volume,
+                        r.avg_daily_traded_value,
+                        r.data_confidence,
+                        r.stage_status,
+                        r.near_miss_status,
+                        json.dumps(r.score_breakdown),
+                        json.dumps(r.metric_statuses),
+                        r.created_at,
+                    )
+                    for r in deduped_results
+                ]
+                execute_values(cursor, pg_insert_sql, value_tuples, page_size=1000)
+            else:
+                for r in deduped_results:
+                    score_json = json.dumps(r.score_breakdown)
+                    metric_json = json.dumps(r.metric_statuses)
+                    created_at_val = r.created_at.isoformat()
+                    values = (
+                        r.id,
+                        r.run_id,
+                        r.canonical_company_id,
+                        r.ticker,
+                        r.company_name,
+                        r.country,
+                        r.exchange,
+                        r.sector,
+                        r.rank,
+                        r.score,
+                        r.display_price,
+                        r.market_cap_display,
+                        r.display_currency,
+                        r.fwd_pe,
+                        r.peg,
+                        r.ev_ebitda,
+                        r.beta,
+                        r.nd_ebitda,
+                        r.yield_pct,
+                        r.eps_growth_pct,
+                        r.pe_vs_benchmark,
+                        r.price_to_sales,
+                        r.price_to_cash_flow,
+                        r.revenue_growth_fwd,
+                        r.avg_daily_volume,
+                        r.avg_daily_traded_value,
+                        r.data_confidence,
+                        r.stage_status,
+                        r.near_miss_status,
+                        score_json,
+                        metric_json,
+                        created_at_val,
+                    )
+                    cursor.execute(insert_sql, values)
             conn.commit()
             return len(results)
         except Exception as e:
@@ -374,6 +442,8 @@ class ScreeningRepository:
             params.append(sector)
 
         query = f"SELECT * FROM screening_results WHERE {' AND '.join(conditions)} ORDER BY rank ASC LIMIT {limit}"
+
+        # De-duplicate by id to avoid PostgreSQL CardinalityViolation
 
         try:
             cursor = conn.cursor()

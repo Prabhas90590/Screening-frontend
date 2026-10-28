@@ -24,7 +24,8 @@ async def lifespan(app: FastAPI):
     logger.info("Server starting up: verifying database tables...")
     db_manager.init_tables()
     yield
-    logger.info("Server shutting down.")
+    logger.info("Server shutting down: closing database connection pool...")
+    db_manager.close_all()
 
 
 app = FastAPI(

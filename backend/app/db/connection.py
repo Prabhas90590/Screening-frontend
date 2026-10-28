@@ -7,12 +7,14 @@ import json
 import logging
 import os
 from pathlib import Path
+import threading
 from typing import Any, Dict, Optional
 import urllib.parse
 
 from app.core.config import settings
 
 logger = logging.getLogger("app.db")
+
 
 # Table schema DDL for PostgreSQL
 POSTGRES_SCHEMA_SQL = """
@@ -563,29 +565,111 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_type ON audit_events(event_type, cre
 """
 
 
+class PooledConnectionWrapper:
+    """Wraps a psycopg2 connection from the pool so that calling .close()
+    returns the connection back to the pool rather than closing the physical socket."""
+
+    def __init__(self, conn, pool):
+        self._conn = conn
+        self._pool = pool
+        self._closed = False
+
+    def close(self):
+        if not self._closed:
+            self._closed = True
+            if self._pool is not None and self._conn is not None:
+                try:
+                    if not self._conn.closed:
+                        # Rollback uncommitted transactions so the connection returns clean
+                        self._conn.rollback()
+                    self._pool.putconn(self._conn)
+                except Exception as e:
+                    logger.warning(f"Error returning connection to pool: {e}")
+
+    def commit(self):
+        return self._conn.commit()
+
+    def rollback(self):
+        return self._conn.rollback()
+
+    def cursor(self, *args, **kwargs):
+        return self._conn.cursor(*args, **kwargs)
+
+    @property
+    def closed(self):
+        return self._closed or self._conn.closed
+
+    @property
+    def info(self):
+        return getattr(self._conn, "info", None)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            self.rollback()
+        else:
+            try:
+                self.commit()
+            except Exception:
+                pass
+        self.close()
+
+    def __repr__(self):
+        return f"<PooledConnectionWrapper({repr(self._conn)})>"
+
+
 class DatabaseManager:
-    """Manages database connection lifecycle and schema auto-creation."""
+    """Manages database connection lifecycle, pooling, and schema auto-creation."""
 
     def __init__(self, database_url: str):
         self.database_url = database_url
         self.is_postgres = database_url.startswith("postgresql://") or database_url.startswith("postgres://")
         self._initialized = False
+        self._pool = None
+        self._pool_lock = threading.Lock()
+
+    def _get_pool(self):
+        """Lazy initialization of the ThreadedConnectionPool with safe limits."""
+        if not self.is_postgres:
+            return None
+        if self._pool is None:
+            with self._pool_lock:
+                if self._pool is None:
+                    try:
+                        from psycopg2.pool import ThreadedConnectionPool
+                        # Keep min 2, max 15 connections to protect PostgreSQL from connection exhaustion
+                        self._pool = ThreadedConnectionPool(minconn=2, maxconn=15, dsn=self.database_url)
+                        logger.info("Initialized PostgreSQL connection pool (min=2, max=15).")
+                    except Exception as e:
+                        logger.warning(f"Failed to create PostgreSQL connection pool: {e}")
+        return self._pool
 
     def get_connection(self):
-        """Obtain a live database connection."""
+        """Obtain a live database connection from the pool or SQLite fallback."""
         if self.is_postgres:
-            try:
-                import psycopg2
-                from psycopg2.extras import RealDictCursor
-                conn = psycopg2.connect(self.database_url)
-                return conn
-            except ImportError:
-                logger.warning("psycopg2 is not installed. Run 'pip install psycopg2-binary'. Falling back to SQLite.")
-            except Exception as e:
-                logger.warning(
-                    f"Could not connect to PostgreSQL at '{self.database_url}' ({e}). "
-                    "Make sure PostgreSQL is running. Falling back to local SQLite temporarily."
-                )
+            pool = self._get_pool()
+            if pool:
+                try:
+                    raw_conn = pool.getconn()
+                    return PooledConnectionWrapper(raw_conn, pool)
+                except Exception as e:
+                    logger.warning(
+                        f"Connection pool busy or error ({e}). Attempting direct connection..."
+                    )
+                    try:
+                        import psycopg2
+                        raw_conn = psycopg2.connect(self.database_url)
+                        return PooledConnectionWrapper(raw_conn, None)
+                    except Exception as e2:
+                        logger.error(
+                            f"Could not connect to PostgreSQL at '{self.database_url}' ({e2}). "
+                            "Make sure PostgreSQL is running. Falling back to local SQLite temporarily."
+                        )
 
         # SQLite fallback connection
         import sqlite3
@@ -594,6 +678,18 @@ class DatabaseManager:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def close_all(self):
+        """Safely close all connections in the pool on server shutdown."""
+        with self._pool_lock:
+            if self._pool is not None:
+                try:
+                    self._pool.closeall()
+                    logger.info("PostgreSQL connection pool closed successfully.")
+                except Exception as e:
+                    logger.warning(f"Error closing PostgreSQL connection pool: {e}")
+                finally:
+                    self._pool = None
 
     def init_tables(self):
         """Automatically create tables in the database if they don't already exist."""

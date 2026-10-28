@@ -117,8 +117,9 @@ class IngestionService:
 
         # 2. Process each normalized security through Security Master & Repositories
         seen_companies = set()
-        snapshots_count = 0
-        metrics_count = 0
+        fin_snapshots_to_save = []
+        est_snapshots_to_save = []
+        metrics_to_save = []
 
         for sec in all_normalized_securities:
             # A. Security Master: Resolve Legal Entity (Companies Table)
@@ -149,7 +150,7 @@ class IngestionService:
                 free_cash_flow=None,
                 created_at=datetime.utcnow(),
             )
-            snapshot_repository.save_financial_snapshot(fin_snapshot)
+            fin_snapshots_to_save.append(fin_snapshot)
 
             # D. Analyst Estimate Snapshot (estimate_snapshots Table)
             est_snapshot = EstimateSnapshotRecord(
@@ -161,11 +162,9 @@ class IngestionService:
                 eps_growth_fwd=sec.estimates.eps_growth_fwd_pct,
                 created_at=datetime.utcnow(),
             )
-            snapshot_repository.save_estimate_snapshot(est_snapshot)
-            snapshots_count += 2
+            est_snapshots_to_save.append(est_snapshot)
 
             # E. Company Metrics Store (company_metrics Table)
-            # Store raw financial building blocks + preliminary ratios for rule filtering
             traded_val = (
                 (sec.price.price_usd or 0.0) * (sec.price.avg_daily_volume or 0.0)
                 if sec.price.price_usd and sec.price.avg_daily_volume
@@ -185,7 +184,6 @@ class IngestionService:
                 beta=sec.price.beta,
                 revenue=sec.financials.revenue,
                 ebitda=sec.financials.ebitda,
-                # Phase 10 needs total_debt and cash separately for EV/EBITDA
                 total_debt=sec.financials.total_debt,
                 cash=sec.financials.cash_and_equivalents,
                 net_debt=sec.financials.net_debt,
@@ -196,8 +194,14 @@ class IngestionService:
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
             )
-            self.metrics_repo.save_metrics(metrics_record)
-            metrics_count += 1
+            metrics_to_save.append(metrics_record)
+
+        # Bulk save all snapshots & metrics in 3 high-speed database operations!
+        snapshot_repository.save_financial_snapshots_batch(fin_snapshots_to_save)
+        snapshot_repository.save_estimate_snapshots_batch(est_snapshots_to_save)
+        self.metrics_repo.save_metrics_batch(metrics_to_save)
+        snapshots_count = len(fin_snapshots_to_save) + len(est_snapshots_to_save)
+        metrics_count = len(metrics_to_save)
 
         # Run Phase 10 Metrics Engine to calculate derived ratios immediately
         try:
