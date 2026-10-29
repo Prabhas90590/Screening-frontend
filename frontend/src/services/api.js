@@ -284,3 +284,42 @@ export async function clearHoldings(portfolioName = null) {
     throw err;
   }
 }
+
+
+/**
+ * Record or update an analyst Keep/Drop decision in PostgreSQL (Phase 16).
+ */
+export async function recordDecisionApi(decisionData) {
+  try {
+    const res = await fetch(`${API_BASE}/decisions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(decisionData),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `HTTP ${res.status}: Failed to record decision`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Could not persist decision to backend:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Fetch recorded analyst decisions from PostgreSQL (Phase 16).
+ */
+export async function fetchDecisionsApi(runId = null) {
+  try {
+    const url = runId
+      ? `${API_BASE}/decisions?run_id=${encodeURIComponent(runId)}`
+      : `${API_BASE}/decisions`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch decisions`);
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Could not fetch decisions:', err.message);
+    return [];
+  }
+}

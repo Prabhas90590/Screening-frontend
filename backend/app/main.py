@@ -10,6 +10,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.holdings import router as holdings_router
 from app.api.routes.rules import router as rules_router
 from app.api.routes.screening import router as screening_router
+from app.api.routes.decisions import router as decisions_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
@@ -68,6 +69,7 @@ app.include_router(health_router)
 app.include_router(screening_router)
 app.include_router(rules_router)
 app.include_router(holdings_router)
+app.include_router(decisions_router)
 
 
 @app.get("/", tags=["root"])
@@ -79,4 +81,3 @@ def root():
         "documentation": "/docs",
         "health_check": "/health",
     }
-

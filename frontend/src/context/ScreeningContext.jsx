@@ -22,6 +22,8 @@ import {
   fetchRunComparison,
   initiateScreening,
   fetchScreeningRuns,
+  recordDecisionApi,
+  fetchDecisionsApi,
 } from '../services/api';
 
 const ScreeningContext = createContext(null);
@@ -377,9 +379,20 @@ export const ScreeningProvider = ({ children }) => {
       }
 
       try {
-        const realResults = await fetchScreeningResults(selectedRunId);
+        const [realResults, recordedDecisions] = await Promise.all([
+          fetchScreeningResults(selectedRunId),
+          fetchDecisionsApi(selectedRunId).catch(() => []),
+        ]);
+        const decisionMap = new Map();
+        (recordedDecisions || []).forEach((d) => {
+          if (d.canonical_company_id) decisionMap.set(d.canonical_company_id, d);
+        });
+
         if (isMounted && Array.isArray(realResults) && realResults.length > 0) {
-          const mapped = realResults.map((r) => ({
+          const mapped = realResults.map((r) => {
+            const compId = r.canonical_company_id || r.id;
+            const existingDec = decisionMap.get(compId);
+            return {
             id: r.canonical_company_id || r.id,
             rank: r.rank,
             name: r.company_name,
@@ -409,10 +422,13 @@ export const ScreeningProvider = ({ children }) => {
             nearMissStatus: r.near_miss_status || 'none',
             deltaStatus: r.stage_status === 'passed' ? 'retained' : 'exited',
             movementReason: r.metric_statuses?.diversification || (r.near_miss_status !== 'none' ? (r.near_miss_status === 'rank_near_miss' ? 'Rank Near-Miss' : 'Rule Near-Miss') : ''),
-            decisionReason: r.metric_statuses?.diversification || r.decision_reason || '',
+            decision: existingDec?.decision || r.decision || 'pending',
+            decisionReason: existingDec?.decision_reason || r.metric_statuses?.diversification || r.decision_reason || '',
+            decisionNote: existingDec?.decision_note || r.decision_note || '',
             scoreBreakdown: r.score_breakdown || [],
             metricStatuses: r.metric_statuses || {},
-          }));
+          };
+          });
           setSecurities(mapped);
           return;
         }
@@ -716,18 +732,34 @@ export const ScreeningProvider = ({ children }) => {
   }, [filterSector, selectedSectorNames.join('|')]);
 
   const setSecurityDecision = (id, decision, reason, note) => {
+    let targetSec = null;
     setSecurities((prev) =>
-      prev.map((sec) =>
-        sec.id === id
-          ? {
-              ...sec,
-              decision,
-              decisionReason: reason !== undefined ? reason : sec.decisionReason,
-              decisionNote: note !== undefined ? note : sec.decisionNote,
-            }
-          : sec
-      )
+      prev.map((sec) => {
+        if (sec.id === id) {
+          targetSec = {
+            ...sec,
+            decision,
+            decisionReason: reason !== undefined ? reason : sec.decisionReason,
+            decisionNote: note !== undefined ? note : sec.decisionNote,
+          };
+          return targetSec;
+        }
+        return sec;
+      })
     );
+
+    // Phase 16: Persist analyst decision to PostgreSQL
+    if (targetSec) {
+      recordDecisionApi({
+        canonical_company_id: targetSec.id || id,
+        decision,
+        decision_reason: reason !== undefined ? reason : targetSec.decisionReason,
+        decision_note: note !== undefined ? note : targetSec.decisionNote,
+        run_id: selectedRunId,
+      }).catch((err) => {
+        console.warn('[ScreeningContext] Could not persist decision to backend:', err);
+      });
+    }
   };
 
   const toggleSector = (name) => {

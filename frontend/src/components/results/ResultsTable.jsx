@@ -608,11 +608,14 @@ export const ResultsTable = ({
                       <div className="inline-flex rounded-lg shadow-2xs space-x-1">
                         <button
                           type="button"
-                          onClick={() => setSecurityDecision(item.id, 'keep')}
-                          title="Mark position to keep in portfolio"
+                          onClick={() => {
+                            setSecurityDecision(item.id, 'keep');
+                            setSelectedSecurityId(item.id);
+                          }}
+                          title="Mark position to keep in portfolio and specify reason in drawer"
                           className={`px-2.5 py-1 text-[11px] font-bold rounded transition-colors cursor-pointer ${
                             item.decision === 'keep'
-                              ? 'bg-[#147b73] text-white shadow-2xs'
+                              ? 'bg-[#147b73] text-white shadow-2xs ring-2 ring-[#147b73]/30'
                               : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
                           }`}
                         >
@@ -620,11 +623,14 @@ export const ResultsTable = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setSecurityDecision(item.id, 'drop')}
-                          title="Mark position to divest / trim"
+                          onClick={() => {
+                            setSecurityDecision(item.id, 'drop');
+                            setSelectedSecurityId(item.id);
+                          }}
+                          title="Mark position to divest or trim and specify reason in drawer"
                           className={`px-2.5 py-1 text-[11px] font-bold rounded transition-colors cursor-pointer ${
                             item.decision === 'drop'
-                              ? 'bg-rose-600 text-white shadow-2xs'
+                              ? 'bg-rose-600 text-white shadow-2xs ring-2 ring-rose-500/30'
                               : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
                           }`}
                         >

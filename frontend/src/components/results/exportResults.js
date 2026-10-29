@@ -57,6 +57,8 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
     'Yield %',
     'EPS Growth %',
     'Data Confidence',
+    'Decision',
+    'Decision Reason',
     'Status / Note',
   ];
 
@@ -119,6 +121,8 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
       yieldDisplay,
       epsGrowthDisplay,
       sec.dataConfidence || 'High',
+      sec.decision ? sec.decision.toUpperCase() : 'PENDING',
+      sec.decisionReason || '',
       note,
     ];
   };
@@ -148,6 +152,8 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
     { wch: 10 }, // Yield %
     { wch: 12 }, // EPS Growth %
     { wch: 16 }, // Data Confidence
+    { wch: 14 }, // Decision (KEEP / DROP / PENDING)
+    { wch: 36 }, // Decision Reason
     { wch: 45 }, // Status / Note
   ];
 

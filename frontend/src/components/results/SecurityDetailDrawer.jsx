@@ -15,7 +15,8 @@ import {
   PieChart,
   Layers,
   Scale,
-  Award
+  Award,
+  Plus
 } from 'lucide-react';
 import { useScreening } from '../../context/ScreeningContext';
 
@@ -38,6 +39,9 @@ export const SecurityDetailDrawer = ({
 
   const [localReason, setLocalReason] = useState('');
   const [localNote, setLocalNote] = useState('');
+  const [customKeepReasons, setCustomKeepReasons] = useState([]);
+  const [customDropReasons, setCustomDropReasons] = useState([]);
+  const [newReasonInput, setNewReasonInput] = useState('');
 
   const activeProfileName =
     currentRun?.rules ||
@@ -168,8 +172,104 @@ export const SecurityDetailDrawer = ({
 
   if (!selectedSecurity) return null;
 
+  // Dynamic metric-based Keep reasons tailored to stock fundamentals
+  const dynamicKeepReasons = useMemo(() => {
+    if (!selectedSecurity) return [];
+    const reasons = [];
+
+    if (selectedSecurity.score && selectedSecurity.score >= 60) {
+      reasons.push(`High Quality Score (${selectedSecurity.score}/100)`);
+    }
+    if (selectedSecurity.epsGrowthPct) {
+      reasons.push(`Strong EPS Growth (${selectedSecurity.epsGrowthPct}% fwd)`);
+    }
+    if (selectedSecurity.fwdPe) {
+      reasons.push(`Attractive Valuation (FWD P/E ${selectedSecurity.fwdPe}x)`);
+    }
+    if (selectedSecurity.yieldPct && parseFloat(selectedSecurity.yieldPct) > 1.0) {
+      reasons.push(`Attractive Dividend Yield (${selectedSecurity.yieldPct}%)`);
+    }
+    if (selectedSecurity.ndEbitda && selectedSecurity.sector !== 'Financials') {
+      reasons.push(`Low Leverage / Sound Balance Sheet (ND/EBITDA ${selectedSecurity.ndEbitda})`);
+    }
+    if (selectedSecurity.peg && parseFloat(selectedSecurity.peg) < 1.5) {
+      reasons.push(`Favorable PEG Ratio (${selectedSecurity.peg}x growth)`);
+    }
+    if (selectedSecurity.beta && parseFloat(selectedSecurity.beta) < 1.0) {
+      reasons.push(`Low Volatility / Defensive Hedge (Beta ${selectedSecurity.beta})`);
+    }
+
+    reasons.push(
+      'Market Leader with Wide Competitive Moat',
+      'Core Strategic Benchmark Heavyweight',
+      'Earnings Momentum & Margin Expansion',
+      'High Return on Invested Capital (ROIC)'
+    );
+
+    return reasons;
+  }, [selectedSecurity]);
+
+  // Dynamic metric-based Drop reasons tailored to stock fundamentals & rule breaches
+  const dynamicDropReasons = useMemo(() => {
+    if (!selectedSecurity) return [];
+    const reasons = [];
+
+    if (selectedSecurity.stageStatus !== 'passed' || selectedSecurity.deltaStatus === 'exited') {
+      reasons.push(`Failed Screening Knockout Floor (${selectedSecurity.movementReason || selectedSecurity.decisionReason || 'Rule Floor Breach'})`);
+    }
+    if (selectedSecurity.fwdPe && parseFloat(selectedSecurity.fwdPe) > 25) {
+      reasons.push(`Stretched Valuation (P/E ${selectedSecurity.fwdPe}x) / Multiple Compression Risk`);
+    }
+    if (selectedSecurity.ndEbitda && selectedSecurity.sector !== 'Financials') {
+      reasons.push(`Elevated Leverage / Debt Burden (ND/EBITDA ${selectedSecurity.ndEbitda})`);
+    }
+    if (selectedSecurity.epsGrowthPct && parseFloat(selectedSecurity.epsGrowthPct) < 5) {
+      reasons.push(`Earnings Deceleration / Weak Growth Outlook (${selectedSecurity.epsGrowthPct}%)`);
+    }
+    if (selectedSecurity.beta && parseFloat(selectedSecurity.beta) > 1.3) {
+      reasons.push(`Excessive Market Volatility / Downside Risk (Beta ${selectedSecurity.beta})`);
+    }
+
+    reasons.push(
+      'Rank Deterioration / Displaced by Higher-Conviction Contenders',
+      'Sector / Regional Concentration Risk Rebalance',
+      'Investment Thesis Broken / Governance Concerns',
+      'Profit Realization / Tax-Loss Harvesting'
+    );
+
+    return reasons;
+  }, [selectedSecurity]);
+
   const handleDecision = (decisionType) => {
-    setSecurityDecision(selectedSecurity.id, decisionType, localReason, localNote);
+    let reasonToUse = localReason;
+    if (!reasonToUse) {
+      if (decisionType === 'keep') {
+        reasonToUse = dynamicKeepReasons[0] || 'Quality conviction';
+      } else {
+        reasonToUse = dynamicDropReasons[0] || 'Rebalance / divest';
+      }
+      setLocalReason(reasonToUse);
+    }
+    setSecurityDecision(selectedSecurity.id, decisionType, reasonToUse, localNote);
+  };
+
+  const handleAddCustomReason = (e) => {
+    if (e) e.preventDefault();
+    const trimmed = newReasonInput.trim();
+    if (!trimmed) return;
+    const currentDec = selectedSecurity.decision || 'keep';
+    if (currentDec === 'keep') {
+      if (!customKeepReasons.includes(trimmed)) {
+        setCustomKeepReasons((prev) => [trimmed, ...prev]);
+      }
+    } else {
+      if (!customDropReasons.includes(trimmed)) {
+        setCustomDropReasons((prev) => [trimmed, ...prev]);
+      }
+    }
+    setLocalReason(trimmed);
+    setSecurityDecision(selectedSecurity.id, currentDec, trimmed, localNote);
+    setNewReasonInput('');
   };
 
   const handleReasonChange = (val) => {
@@ -900,64 +1000,156 @@ export const SecurityDetailDrawer = ({
           </div>
         </div>
 
-        {/* ── 7. ANALYST ACTION (KEEP / DROP DECISION) ── */}
+        {/* ── 7. ANALYST ACTION (KEEP / DROP DECISION - PHASE 16) ── */}
         <div className="pt-2 border-t border-slate-200">
-          <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-            <Scale size={14} className="text-[#147b73]" />
-            <span>6. Your Investment Decision</span>
-          </h3>
-          <div className="space-y-3">
+          <div className="flex items-center justify-between mb-2.5">
+            <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+              <Scale size={14} className="text-[#147b73]" />
+              <span>6. Analyst Decision & Attribution</span>
+            </h3>
+            <span className="text-[10px] font-semibold text-slate-400">
+              Phase 16 · Auto-saved to PostgreSQL
+            </span>
+          </div>
+
+          <div className="space-y-3 bg-slate-50/70 p-3 rounded-lg border border-slate-200/80">
+            {/* Keep vs Drop Primary Toggle Buttons */}
             <div className="flex items-center space-x-2">
               <button
                 type="button"
                 onClick={() => handleDecision('keep')}
-                className={`flex-1 py-2 text-xs font-semibold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                   selectedSecurity.decision === 'keep'
-                    ? 'bg-[#147b73] text-white shadow-xs'
+                    ? 'bg-[#147b73] text-white shadow-xs ring-2 ring-[#147b73]/30'
                     : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
                 }`}
               >
-                <CheckCircle2 size={14} />
+                <CheckCircle2 size={15} />
                 <span>Keep in Portfolio</span>
               </button>
               <button
                 type="button"
                 onClick={() => handleDecision('drop')}
-                className={`flex-1 py-2 text-xs font-semibold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                   selectedSecurity.decision === 'drop'
-                    ? 'bg-rose-600 text-white shadow-xs'
+                    ? 'bg-rose-600 text-white shadow-xs ring-2 ring-rose-500/30'
                     : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
                 }`}
               >
-                <ShieldAlert size={14} />
+                <ShieldAlert size={15} />
                 <span>Drop / Divest</span>
               </button>
             </div>
 
-            {/* Decision Reason Dropdown */}
-            <div>
+            {/* Dynamic Reason Selector (Filtered strictly by Keep or Drop) */}
+            <div className="space-y-1">
+              <label className="block text-[11px] font-semibold text-slate-600">
+                {selectedSecurity.decision === 'drop'
+                  ? 'Drop / Divest Reason (Tailored to Stock Metrics):'
+                  : 'Keep Reason (Tailored to Stock Metrics):'}
+              </label>
+
               <select
                 value={localReason}
                 onChange={(e) => handleReasonChange(e.target.value)}
-                className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-xs text-slate-700 focus:outline-hidden focus:border-[#147b73]"
+                className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-xs text-slate-800 focus:outline-hidden focus:border-[#147b73] focus:ring-1 focus:ring-[#147b73]"
               >
-                <option value="">Reason for decision (optional)</option>
-                <option value="valuation_headroom">Valuation headroom</option>
-                <option value="earnings_quality">High earnings quality</option>
-                <option value="regulatory_risk">Regulatory overhang</option>
-                <option value="debt_profile">Elevated leverage</option>
-                <option value="cyclical_exposure">High cyclical exposure</option>
+                <option value="">
+                  {selectedSecurity.decision === 'drop'
+                    ? '-- Choose Drop Reason --'
+                    : '-- Choose Keep Reason --'}
+                </option>
+
+                {/* Metric-driven & Institutional reasons */}
+                <optgroup
+                  label={
+                    selectedSecurity.decision === 'drop'
+                      ? 'Knockout & Fundamental Drop Reasons'
+                      : 'Quality & Fundamental Keep Drivers'
+                  }
+                >
+                  {(selectedSecurity.decision === 'drop' ? dynamicDropReasons : dynamicKeepReasons).map(
+                    (reason, idx) => (
+                      <option key={`dyn-${idx}`} value={reason}>
+                        {reason}
+                      </option>
+                    )
+                  )}
+                </optgroup>
+
+                {/* Custom User Added Reasons */}
+                {((selectedSecurity.decision === 'drop' ? customDropReasons : customKeepReasons).length > 0 ||
+                  (localReason &&
+                    !(selectedSecurity.decision === 'drop' ? dynamicDropReasons : dynamicKeepReasons).includes(
+                      localReason
+                    ))) && (
+                  <optgroup label="Custom Analyst Reasons">
+                    {localReason &&
+                      !(selectedSecurity.decision === 'drop' ? dynamicDropReasons : dynamicKeepReasons).includes(
+                        localReason
+                      ) &&
+                      !(selectedSecurity.decision === 'drop' ? customDropReasons : customKeepReasons).includes(
+                        localReason
+                      ) && (
+                        <option value={localReason}>{localReason}</option>
+                      )}
+                    {(selectedSecurity.decision === 'drop' ? customDropReasons : customKeepReasons).map(
+                      (reason, idx) => (
+                        <option key={`cust-${idx}`} value={reason}>
+                          {reason}
+                        </option>
+                      )
+                    )}
+                  </optgroup>
+                )}
               </select>
             </div>
 
-            {/* Analyst Note Input */}
-            <div>
+            {/* Add Custom Manual Reason Control */}
+            <div className="space-y-1">
+              <span className="block text-[10px] font-medium text-slate-500">
+                Add a custom {selectedSecurity.decision === 'drop' ? 'drop' : 'keep'} reason:
+              </span>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  placeholder={
+                    selectedSecurity.decision === 'drop'
+                      ? 'Type custom divestment reason...'
+                      : 'Type custom rationale (e.g. 20% margin expansion guided)...'
+                  }
+                  value={newReasonInput}
+                  onChange={(e) => setNewReasonInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddCustomReason();
+                    }
+                  }}
+                  className="flex-1 bg-white border border-slate-300 rounded-md px-3 py-1.5 text-xs text-slate-700 placeholder-slate-400 focus:outline-hidden focus:border-[#147b73]"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCustomReason}
+                  className="px-3 py-1.5 bg-[#147b73] hover:bg-[#0f635c] text-white text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer flex items-center gap-1 shrink-0"
+                >
+                  <Plus size={13} />
+                  <span>Add</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Optional Long-form Analyst Notes */}
+            <div className="space-y-1">
+              <span className="block text-[10px] font-medium text-slate-500">
+                Additional Investment Committee Note (Optional):
+              </span>
               <input
                 type="text"
-                placeholder="Add an analyst note (optional)"
+                placeholder="e.g. Client mandates 15% ESG cap, approved in Q3 committee review"
                 value={localNote}
                 onChange={(e) => handleNoteChange(e.target.value)}
-                className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-xs text-slate-700 placeholder-slate-400 focus:outline-hidden focus:border-[#147b73]"
+                className="w-full bg-white border border-slate-300 rounded-md px-3 py-1.5 text-xs text-slate-700 placeholder-slate-400 focus:outline-hidden focus:border-[#147b73]"
               />
             </div>
           </div>
