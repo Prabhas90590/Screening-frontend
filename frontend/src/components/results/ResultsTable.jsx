@@ -307,10 +307,16 @@ export const ResultsTable = ({
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                <th className="py-3 px-3 text-center whitespace-nowrap min-w-[125px]">
-                  Rank ({activeProfileName})
+                <th
+                  className="py-3 px-2.5 text-center whitespace-nowrap min-w-[85px] w-[90px]"
+                  title={`Screening Model Rank (${activeProfileName})`}
+                >
+                  Model Rank
                 </th>
-                <th className="py-3 px-3 text-center whitespace-nowrap min-w-[115px]">
+                <th
+                  className="py-3 px-2.5 text-center whitespace-nowrap min-w-[95px] w-[100px]"
+                  title="Client Uploaded Portfolio Holding Rank"
+                >
                   Holding Rank
                 </th>
                 <th className="py-3 px-3.5 min-w-[200px]">Security &amp; Ticker</th>
