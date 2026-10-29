@@ -9,9 +9,15 @@ import { exportResultsToCsv } from './exportResults';
 import { useScreening } from '../../context/ScreeningContext';
 
 export const ResultsView = () => {
-  const { selectedSecurity, resultsTab, securities } = useScreening();
+  const { selectedSecurity, resultsTab, securities, currentRun, activeProfile } = useScreening();
   const [holdingsSubTab, setHoldingsSubTab] = React.useState('all');
   const holdingsImport = useHoldingsImport(securities);
+
+  const activeProfileName =
+    currentRun?.rules ||
+    (activeProfile
+      ? `${activeProfile.name}${activeProfile.versionNumber ? ` v${activeProfile.versionNumber}` : ''}`
+      : 'Core Strategy');
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -25,7 +31,7 @@ export const ResultsView = () => {
           {...holdingsImport}
           holdingsSubTab={holdingsSubTab}
           setHoldingsSubTab={setHoldingsSubTab}
-          exportResults={() => exportResultsToCsv(securities)}
+          exportResults={() => exportResultsToCsv(securities, activeProfileName)}
         />
 
         {/* 3. Streamlined 7-Column Results Table */}
