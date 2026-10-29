@@ -248,6 +248,8 @@ CREATE INDEX IF NOT EXISTS idx_screening_results_near_miss ON screening_results(
 CREATE TABLE IF NOT EXISTS decisions (
     decision_id VARCHAR(64) PRIMARY KEY,
     canonical_company_id VARCHAR(64) NOT NULL REFERENCES companies(canonical_id) ON DELETE CASCADE,
+    company_name VARCHAR(255),
+    profile_name VARCHAR(128),
     decision VARCHAR(16) NOT NULL,
     decision_reason VARCHAR(255),
     decision_note TEXT,
@@ -257,6 +259,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_company ON decisions(canonical_company_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_profile ON decisions(profile_name);
 
 CREATE TABLE IF NOT EXISTS holdings (
     holding_id VARCHAR(64) PRIMARY KEY,
@@ -523,6 +526,8 @@ CREATE INDEX IF NOT EXISTS idx_screening_results_near_miss ON screening_results(
 CREATE TABLE IF NOT EXISTS decisions (
     decision_id VARCHAR(64) PRIMARY KEY,
     canonical_company_id VARCHAR(64) NOT NULL REFERENCES companies(canonical_id) ON DELETE CASCADE,
+    company_name TEXT,
+    profile_name TEXT,
     decision VARCHAR(16) NOT NULL,
     decision_reason VARCHAR(255),
     decision_note TEXT,
@@ -532,6 +537,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_company ON decisions(canonical_company_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_profile ON decisions(profile_name);
 
 CREATE TABLE IF NOT EXISTS holdings (
     holding_id VARCHAR(64) PRIMARY KEY,
@@ -721,6 +727,8 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE screening_results ADD COLUMN IF NOT EXISTS avg_daily_volume DOUBLE PRECISION;")
                 cursor.execute("ALTER TABLE screening_results ADD COLUMN IF NOT EXISTS avg_daily_traded_value DOUBLE PRECISION;")
                 cursor.execute("ALTER TABLE holdings ADD COLUMN IF NOT EXISTS holding_rank INTEGER;")
+                cursor.execute("ALTER TABLE decisions ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);")
+                cursor.execute("ALTER TABLE decisions ADD COLUMN IF NOT EXISTS profile_name VARCHAR(128);")
                 conn.commit()
                 logger.info("PostgreSQL persistence tables verified/created successfully.")
             else:

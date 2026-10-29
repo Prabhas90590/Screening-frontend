@@ -379,12 +379,16 @@ export const ScreeningProvider = ({ children }) => {
       }
 
       try {
-        const [realResults, recordedDecisions] = await Promise.all([
+        const [realResults, runDecisions, profileDecisions] = await Promise.all([
           fetchScreeningResults(selectedRunId),
           fetchDecisionsApi(selectedRunId).catch(() => []),
+          fetchDecisionsApi(null, currentRun?.rules).catch(() => []),
         ]);
         const decisionMap = new Map();
-        (recordedDecisions || []).forEach((d) => {
+        (profileDecisions || []).forEach((d) => {
+          if (d.canonical_company_id) decisionMap.set(d.canonical_company_id, d);
+        });
+        (runDecisions || []).forEach((d) => {
           if (d.canonical_company_id) decisionMap.set(d.canonical_company_id, d);
         });
 
@@ -748,10 +752,18 @@ export const ScreeningProvider = ({ children }) => {
       })
     );
 
-    // Phase 16: Persist analyst decision to PostgreSQL
+    // Phase 16: Persist analyst decision to PostgreSQL with company_name and profile_name
     if (targetSec) {
+      const activeProfName =
+        currentRun?.rules ||
+        (activeProfile
+          ? `${activeProfile.name}${activeProfile.versionNumber ? ` v${activeProfile.versionNumber}` : ''}`
+          : 'Core Strategy');
+
       recordDecisionApi({
         canonical_company_id: targetSec.id || id,
+        company_name: targetSec.name,
+        profile_name: activeProfName,
         decision,
         decision_reason: reason !== undefined ? reason : targetSec.decisionReason,
         decision_note: note !== undefined ? note : targetSec.decisionNote,

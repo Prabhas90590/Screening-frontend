@@ -310,16 +310,39 @@ export async function recordDecisionApi(decisionData) {
 /**
  * Fetch recorded analyst decisions from PostgreSQL (Phase 16).
  */
-export async function fetchDecisionsApi(runId = null) {
+export async function fetchDecisionsApi(runId = null, profileName = null) {
   try {
-    const url = runId
-      ? `${API_BASE}/decisions?run_id=${encodeURIComponent(runId)}`
-      : `${API_BASE}/decisions`;
-    const res = await fetch(url);
+    const params = new URLSearchParams();
+    if (runId) params.append('run_id', runId);
+    if (profileName) params.append('profile_name', profileName);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`${API_BASE}/decisions${qs}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch decisions`);
     return await res.json();
   } catch (err) {
     console.warn('[API] Could not fetch decisions:', err.message);
     return [];
+  }
+}
+
+
+/**
+ * Bulk-sync all analyst Keep/Drop decisions upon Excel export to PostgreSQL (Phase 16).
+ */
+export async function syncDecisionsApi({ profile_name, run_id, decisions }) {
+  try {
+    const res = await fetch(`${API_BASE}/decisions/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile_name, run_id, decisions }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `HTTP ${res.status}: Failed to sync decisions`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Could not sync decisions to backend:', err.message);
+    return null;
   }
 }

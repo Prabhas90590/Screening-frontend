@@ -6,6 +6,7 @@ import { SecurityDetailDrawer } from './SecurityDetailDrawer';
 import { ResultsLegend } from './ResultsLegend';
 import { useHoldingsImport } from './useHoldingsImport';
 import { exportResultsToExcel } from './exportResults';
+import { syncDecisionsApi } from '../../services/api';
 import { useScreening } from '../../context/ScreeningContext';
 
 export const ResultsView = () => {
@@ -19,6 +20,36 @@ export const ResultsView = () => {
       ? `${activeProfile.name}${activeProfile.versionNumber ? ` v${activeProfile.versionNumber}` : ''}`
       : 'Core Strategy');
 
+  // Phase 16: Bulk sync decisions to PostgreSQL with profile_name and company_name upon Excel export
+  const handleExportWithSync = async () => {
+    const decisionsToSync = (securities || [])
+      .filter((s) => s.decision === 'keep' || s.decision === 'drop')
+      .map((s) => ({
+        canonical_company_id: s.id,
+        company_name: s.name,
+        profile_name: activeProfileName,
+        decision: s.decision,
+        decision_reason: s.decisionReason || '',
+        decision_note: s.decisionNote || '',
+        run_id: currentRun?.id || null,
+      }));
+
+    if (decisionsToSync.length > 0) {
+      try {
+        await syncDecisionsApi({
+          profile_name: activeProfileName,
+          run_id: currentRun?.id || null,
+          decisions: decisionsToSync,
+        });
+      } catch (err) {
+        console.warn('[ResultsView] Could not sync decisions to DB on export:', err);
+      }
+    }
+
+    // Trigger Excel download with Category, Rank, Decision, Decision Reason, etc.
+    exportResultsToExcel(securities, activeProfileName);
+  };
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Main Table Content */}
@@ -31,7 +62,7 @@ export const ResultsView = () => {
           {...holdingsImport}
           holdingsSubTab={holdingsSubTab}
           setHoldingsSubTab={setHoldingsSubTab}
-          exportResults={() => exportResultsToExcel(securities, activeProfileName)}
+          exportResults={handleExportWithSync}
         />
 
         {/* 3. Streamlined 7-Column Results Table */}

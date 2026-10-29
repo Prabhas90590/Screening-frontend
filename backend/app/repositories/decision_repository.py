@@ -20,30 +20,41 @@ class DecisionRepository:
     # DECISIONS
     # -------------------------------------------------------------
 
+    DECISION_SELECT_COLS = (
+        "decision_id, canonical_company_id, company_name, profile_name, decision, "
+        "decision_reason, decision_note, run_id, decided_by, created_at, updated_at"
+    )
+
     def save_decision(self, decision: DecisionRecord) -> str:
-        """Insert or update a Keep/Drop analyst decision."""
+        """Insert or update a Keep/Drop analyst decision with company_name and profile_name."""
         conn = db_manager.get_connection()
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
 
         insert_sql = """
             INSERT INTO decisions (
-                decision_id, canonical_company_id, decision, decision_reason,
-                decision_note, run_id, decided_by, created_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                decision_id, canonical_company_id, company_name, profile_name, decision,
+                decision_reason, decision_note, run_id, decided_by, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (decision_id) DO UPDATE SET
+                company_name = COALESCE(EXCLUDED.company_name, decisions.company_name),
+                profile_name = COALESCE(EXCLUDED.profile_name, decisions.profile_name),
                 decision = EXCLUDED.decision,
                 decision_reason = EXCLUDED.decision_reason,
                 decision_note = EXCLUDED.decision_note,
+                run_id = COALESCE(EXCLUDED.run_id, decisions.run_id),
                 updated_at = EXCLUDED.updated_at;
         """ if is_postgres else """
             INSERT INTO decisions (
-                decision_id, canonical_company_id, decision, decision_reason,
-                decision_note, run_id, decided_by, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                decision_id, canonical_company_id, company_name, profile_name, decision,
+                decision_reason, decision_note, run_id, decided_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (decision_id) DO UPDATE SET
+                company_name = COALESCE(excluded.company_name, decisions.company_name),
+                profile_name = COALESCE(excluded.profile_name, decisions.profile_name),
                 decision = excluded.decision,
                 decision_reason = excluded.decision_reason,
                 decision_note = excluded.decision_note,
+                run_id = COALESCE(excluded.run_id, decisions.run_id),
                 updated_at = excluded.updated_at;
         """
 
@@ -53,6 +64,8 @@ class DecisionRepository:
         values = (
             decision.decision_id,
             decision.canonical_company_id,
+            decision.company_name,
+            decision.profile_name,
             decision.decision,
             decision.decision_reason,
             decision.decision_note,
@@ -74,19 +87,85 @@ class DecisionRepository:
         finally:
             conn.close()
 
-    def get_decision(self, canonical_company_id: str) -> Optional[DecisionRecord]:
-        """Fetch latest decision for a company."""
+    def save_decisions_batch(self, decisions: List[DecisionRecord]) -> int:
+        """Bulk insert or update a list of analyst decisions in a single transaction."""
+        if not decisions:
+            return 0
         conn = db_manager.get_connection()
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-        query = (
-            "SELECT * FROM decisions WHERE canonical_company_id = %s ORDER BY updated_at DESC LIMIT 1"
-            if is_postgres else
-            "SELECT * FROM decisions WHERE canonical_company_id = ? ORDER BY updated_at DESC LIMIT 1"
-        )
+
+        insert_sql = """
+            INSERT INTO decisions (
+                decision_id, canonical_company_id, company_name, profile_name, decision,
+                decision_reason, decision_note, run_id, decided_by, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (decision_id) DO UPDATE SET
+                company_name = COALESCE(EXCLUDED.company_name, decisions.company_name),
+                profile_name = COALESCE(EXCLUDED.profile_name, decisions.profile_name),
+                decision = EXCLUDED.decision,
+                decision_reason = EXCLUDED.decision_reason,
+                decision_note = EXCLUDED.decision_note,
+                run_id = COALESCE(EXCLUDED.run_id, decisions.run_id),
+                updated_at = EXCLUDED.updated_at;
+        """ if is_postgres else """
+            INSERT INTO decisions (
+                decision_id, canonical_company_id, company_name, profile_name, decision,
+                decision_reason, decision_note, run_id, decided_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (decision_id) DO UPDATE SET
+                company_name = COALESCE(excluded.company_name, decisions.company_name),
+                profile_name = COALESCE(excluded.profile_name, decisions.profile_name),
+                decision = excluded.decision,
+                decision_reason = excluded.decision_reason,
+                decision_note = excluded.decision_note,
+                run_id = COALESCE(excluded.run_id, decisions.run_id),
+                updated_at = excluded.updated_at;
+        """
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query, (canonical_company_id,))
+            for d in decisions:
+                created_at_val = d.created_at if is_postgres else d.created_at.isoformat()
+                updated_at_val = d.updated_at if is_postgres else d.updated_at.isoformat()
+                vals = (
+                    d.decision_id,
+                    d.canonical_company_id,
+                    d.company_name,
+                    d.profile_name,
+                    d.decision,
+                    d.decision_reason,
+                    d.decision_note,
+                    d.run_id,
+                    d.decided_by,
+                    created_at_val,
+                    updated_at_val,
+                )
+                cursor.execute(insert_sql, vals)
+            conn.commit()
+            return len(decisions)
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to batch save decisions: {e}")
+            raise
+        finally:
+            conn.close()
+
+    def get_decision(self, canonical_company_id: str, profile_name: Optional[str] = None) -> Optional[DecisionRecord]:
+        """Fetch latest decision for a company, optionally matching profile_name."""
+        conn = db_manager.get_connection()
+        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
+
+        conditions = ["canonical_company_id = %s" if is_postgres else "canonical_company_id = ?"]
+        params: list = [canonical_company_id]
+        if profile_name:
+            conditions.append("profile_name = %s" if is_postgres else "profile_name = ?")
+            params.append(profile_name)
+
+        query = f"SELECT {self.DECISION_SELECT_COLS} FROM decisions WHERE {' AND '.join(conditions)} ORDER BY updated_at DESC LIMIT 1"
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute(query, tuple(params))
             row = cursor.fetchone()
             if not row:
                 return None
@@ -94,15 +173,26 @@ class DecisionRepository:
         finally:
             conn.close()
 
-    def list_decisions(self) -> List[DecisionRecord]:
-        """Retrieve all recorded analyst decisions."""
+    def list_decisions(self, profile_name: Optional[str] = None, run_id: Optional[str] = None) -> List[DecisionRecord]:
+        """Retrieve recorded analyst decisions, optionally filtered by profile_name or run_id."""
         conn = db_manager.get_connection()
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-        query = "SELECT * FROM decisions ORDER BY updated_at DESC"
+
+        conditions = []
+        params: list = []
+        if profile_name:
+            conditions.append("profile_name = %s" if is_postgres else "profile_name = ?")
+            params.append(profile_name)
+        if run_id:
+            conditions.append("run_id = %s" if is_postgres else "run_id = ?")
+            params.append(run_id)
+
+        where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"SELECT {self.DECISION_SELECT_COLS} FROM decisions{where_clause} ORDER BY updated_at DESC"
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query)
+            cursor.execute(query, tuple(params) if params else ())
             rows = cursor.fetchall()
             return [self._row_to_decision(row, is_postgres) for row in rows]
         finally:
@@ -185,29 +275,34 @@ class DecisionRepository:
     # -------------------------------------------------------------
 
     def _row_to_decision(self, row: Any, is_postgres: bool) -> DecisionRecord:
-        if is_postgres:
+        if isinstance(row, (list, tuple)):
+            # Positional mapping from DECISION_SELECT_COLS
             return DecisionRecord(
                 decision_id=row[0],
                 canonical_company_id=row[1],
-                decision=row[2],
-                decision_reason=row[3],
-                decision_note=row[4],
-                run_id=row[5],
-                decided_by=row[6] or "Analyst",
-                created_at=row[7] if isinstance(row[7], datetime) else datetime.fromisoformat(str(row[7])),
-                updated_at=row[8] if isinstance(row[8], datetime) else datetime.fromisoformat(str(row[8])),
+                company_name=row[2],
+                profile_name=row[3],
+                decision=row[4],
+                decision_reason=row[5],
+                decision_note=row[6],
+                run_id=row[7],
+                decided_by=row[8] or "Analyst",
+                created_at=row[9] if isinstance(row[9], datetime) else datetime.fromisoformat(str(row[9])),
+                updated_at=row[10] if isinstance(row[10], datetime) else datetime.fromisoformat(str(row[10])),
             )
         else:
             return DecisionRecord(
                 decision_id=row["decision_id"],
                 canonical_company_id=row["canonical_company_id"],
+                company_name=row.get("company_name"),
+                profile_name=row.get("profile_name"),
                 decision=row["decision"],
-                decision_reason=row["decision_reason"],
-                decision_note=row["decision_note"],
-                run_id=row["run_id"],
-                decided_by=row["decided_by"] or "Analyst",
-                created_at=datetime.fromisoformat(str(row["created_at"])),
-                updated_at=datetime.fromisoformat(str(row["updated_at"])),
+                decision_reason=row.get("decision_reason"),
+                decision_note=row.get("decision_note"),
+                run_id=row.get("run_id"),
+                decided_by=row.get("decided_by") or "Analyst",
+                created_at=row["created_at"] if isinstance(row["created_at"], datetime) else datetime.fromisoformat(str(row["created_at"])),
+                updated_at=row["updated_at"] if isinstance(row["updated_at"], datetime) else datetime.fromisoformat(str(row["updated_at"])),
             )
 
     def _row_to_holding(self, row: Any, is_postgres: bool) -> HoldingRecord:

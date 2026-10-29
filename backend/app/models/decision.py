@@ -9,6 +9,8 @@ class DecisionRecord(BaseModel):
     """Database model for 'decisions' table."""
     decision_id: str = Field(..., description="Unique decision ID, e.g. 'dec-comp-001'")
     canonical_company_id: str = Field(..., description="Foreign key to companies.canonical_id")
+    company_name: Optional[str] = Field(default=None, description="Name of company decided on")
+    profile_name: Optional[str] = Field(default=None, description="Active strategy profile name")
     decision: Literal["keep", "drop"] = Field(..., description="'keep' or 'drop'")
     decision_reason: Optional[str] = None
     decision_note: Optional[str] = None
