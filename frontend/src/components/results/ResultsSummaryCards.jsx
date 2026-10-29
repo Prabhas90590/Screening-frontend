@@ -47,13 +47,11 @@ export const ResultsSummaryCards = () => {
 
   // Derive dynamic metrics from the current run's securities
   const top20Securities = securities.filter(
-    (s) => (s.stageStatus === 'passed' && s.rank <= 20) || (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited')
+    (s) => s.rank !== null && s.rank >= 1 && s.rank <= 20
   );
 
   const nearMissSecurities = securities.filter((s) => {
-    const isTop20 =
-      (s.stageStatus === 'passed' && s.rank !== null && s.rank <= 20) ||
-      (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited');
+    const isTop20 = s.rank !== null && s.rank >= 1 && s.rank <= 20;
     if (isTop20) return false;
     const isRankMiss =
       s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40);

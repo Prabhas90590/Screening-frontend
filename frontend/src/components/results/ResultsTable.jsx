@@ -121,11 +121,9 @@ export const ResultsTable = ({
       return enrichWithHoldings(filtered);
     }
 
-    // Default: 'top20' (only actively qualified top 20 securities)
+    // Default: 'top20' (Top 20 portfolio selection: ranks 1 to 20)
     const top20List = securities.filter(
-      (s) =>
-        (s.stageStatus === 'passed' && s.rank <= 20) ||
-        (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited')
+      (s) => s.rank !== null && s.rank >= 1 && s.rank <= 20
     );
     return enrichWithHoldings(top20List);
   }, [
@@ -374,6 +372,10 @@ export const ResultsTable = ({
                         <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 border border-teal-200 px-2 py-0.5 text-[10px] font-bold text-teal-800">
                           💼 HELD ({item.holdingWeight ? `${item.holdingWeight}%` : 'Held'})
                         </span>
+                      ) : resultsTab === 'top20' && item.stageStatus !== 'passed' ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-300 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                          ⚠️ NEAR MISS FILL
+                        </span>
                       ) : resultsTab === 'nearMisses' ? (
                         item.nearMissStatus === 'rank_near_miss' || (item.rank !== null && item.rank >= 21 && item.rank <= 40) ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-800">
@@ -438,6 +440,10 @@ export const ResultsTable = ({
                               Not evaluated in current regional run · Allocation: {item.weightPct}%
                             </span>
                           )
+                        ) : resultsTab === 'top20' && item.stageStatus !== 'passed' ? (
+                          <span className="inline-block rounded-md px-2.5 py-1 text-[11px] font-medium leading-relaxed bg-amber-50 text-amber-800 border border-amber-200/70">
+                            {item.movementReason || 'Top 20 Portfolio Selection · Closest near-miss contender'}
+                          </span>
                         ) : resultsTab === 'nearMisses' ? (
                           <span className="inline-block rounded-md px-2.5 py-1 text-[11px] font-medium leading-relaxed bg-amber-50 text-amber-800 border border-amber-200/70">
                             {item.movementReason || (item.rank ? `Passed rules · Ranked #${item.rank} (outside Top 20 cutoff)` : 'Close to knockout threshold')}

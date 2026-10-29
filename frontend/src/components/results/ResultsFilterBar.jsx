@@ -37,9 +37,7 @@ export const ResultsFilterBar = ({
   const selectedCountries = countries.filter((country) => country.selected);
   const selectedSectors = sectors.filter((sector) => sector.selected);
 
-  const isTop20 = (s) =>
-    (s.stageStatus === 'passed' && s.rank !== null && s.rank <= 20) ||
-    (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited');
+  const isTop20 = (s) => s.rank !== null && s.rank >= 1 && s.rank <= 20;
 
   const top20Count = securities.filter(isTop20).length || (securities.length > 0 ? 20 : 0);
 

@@ -587,6 +587,12 @@ class PooledConnectionWrapper:
                     self._pool.putconn(self._conn)
                 except Exception as e:
                     logger.warning(f"Error returning connection to pool: {e}")
+            elif self._conn is not None:
+                try:
+                    if not self._conn.closed:
+                        self._conn.close()
+                except Exception as e:
+                    logger.warning(f"Error closing direct connection: {e}")
 
     def commit(self):
         return self._conn.commit()

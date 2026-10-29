@@ -5,49 +5,40 @@ import * as XLSX from 'xlsx';
  * 
  * Grouping structure:
  * 1. Top 20 Portfolio Selection (Ranks 1..20)
- * 2. Near Misses (Ranks 21..40 and Rule Gate Near-Misses) displayed immediately after Top 20
- * 3. Remaining Evaluated Universe
+ *    - Ranks that passed knockout gates: labeled 'Top 20 (Qualified)'
+ *    - Ranks filling out the Top 20: labeled 'Top 20 (Near Miss Selection)'
+ * 2. Near Misses (Ranks 21..40 and Rule Gate Near-Misses) displayed immediately after Top 20 in sequential rank order
+ * 3. Remaining Evaluated Universe (Ranks 41+)
  * 
- * Also includes dedicated 'Top 20 Portfolio' and 'Near Misses' sheets for client presentations.
+ * Includes dedicated 'Top 20 Portfolio' and 'Near Misses' sheets for client presentations.
  */
 export const exportResultsToExcel = (securities = [], profileName = '') => {
-  const isTop20 = (s) =>
-    (s.stageStatus === 'passed' && s.rank !== null && s.rank <= 20) ||
-    (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited');
+  // 1. Top 20 Portfolio Selection (Ranks 1 to 20, sorted strictly by rank ASC)
+  const isTop20 = (s) => s.rank !== null && s.rank !== undefined && s.rank >= 1 && s.rank <= 20;
 
-  // 1. Top 20 Portfolio (Ranks 1 to 20, sorted by rank ASC)
   const top20Securities = securities
     .filter(isTop20)
     .sort((a, b) => (a.rank || 999) - (b.rank || 999));
   const top20Ids = new Set(top20Securities.map((s) => s.id));
 
-  // 2. Near Misses (Strictly excluding any Top 20 stocks)
-  const isRankNearMiss = (s) =>
+  // 2. Near Misses (Strictly outside Top 20, sorted by rank ASC)
+  const isNearMiss = (s) =>
     !top20Ids.has(s.id) &&
-    !isTop20(s) &&
-    (s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40));
+    (s.nearMissStatus === 'rank_near_miss' ||
+      s.nearMissStatus === 'rule_near_miss' ||
+      s.deltaStatus === 'rule_miss' ||
+      s.rankDelta === 'RULE_MISS' ||
+      (s.rank !== null && s.rank !== undefined && s.rank >= 21 && s.rank <= 40));
 
-  const isRuleNearMiss = (s) =>
-    !top20Ids.has(s.id) &&
-    !isTop20(s) &&
-    !isRankNearMiss(s) &&
-    (s.nearMissStatus === 'rule_near_miss' || s.deltaStatus === 'rule_miss' || s.rankDelta === 'RULE_MISS');
-
-  const rankNearMisses = securities
-    .filter(isRankNearMiss)
+  const allNearMisses = securities
+    .filter(isNearMiss)
     .sort((a, b) => (a.rank || 999) - (b.rank || 999));
-
-  const ruleNearMisses = securities
-    .filter(isRuleNearMiss)
-    .sort((a, b) => (b.score || 0) - (a.score || 0));
-
-  const allNearMisses = [...rankNearMisses, ...ruleNearMisses];
   const nearMissIds = new Set(allNearMisses.map((s) => s.id));
 
-  // 3. Remaining Universe
+  // 3. Remaining Evaluated Universe (Ranks 41+, sorted by rank ASC)
   const remainingUniverse = securities
     .filter((s) => !top20Ids.has(s.id) && !nearMissIds.has(s.id))
-    .sort((a, b) => (b.score || 0) - (a.score || 0));
+    .sort((a, b) => (a.rank || 999) - (b.rank || 999));
 
   const headers = [
     'Category',
@@ -69,7 +60,20 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
     'Status / Note',
   ];
 
-  const formatSecurityRow = (sec, categoryLabel) => {
+  const formatSecurityRow = (sec, categoryOverride = null) => {
+    let category = categoryOverride;
+    if (!category) {
+      if (isTop20(sec)) {
+        category = sec.stageStatus === 'passed' ? 'Top 20 (Qualified)' : 'Top 20 (Near Miss Selection)';
+      } else if (sec.nearMissStatus === 'rank_near_miss' || (sec.rank !== null && sec.rank >= 21 && sec.rank <= 40)) {
+        category = 'Near Miss (Rank #21-40)';
+      } else if (sec.nearMissStatus === 'rule_near_miss' || sec.deltaStatus === 'rule_miss' || sec.rankDelta === 'RULE_MISS') {
+        category = 'Near Miss (Rule Gate)';
+      } else {
+        category = 'Evaluated Universe';
+      }
+    }
+
     const yieldDisplay =
       sec.yieldPct !== undefined && sec.yieldPct !== null && sec.yieldPct !== ''
         ? String(sec.yieldPct).includes('%')
@@ -85,11 +89,13 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
 
     let note = sec.movementReason || '';
     if (!note) {
-      if (categoryLabel.includes('Top 20')) {
-        note = sec.stageStatus === 'passed' ? 'Qualified Top 20 Winner' : 'Top 20 Portfolio Selection';
-      } else if (categoryLabel.includes('Rank')) {
+      if (category.includes('Qualified')) {
+        note = 'Qualified Top 20 Winner';
+      } else if (category.includes('Near Miss Selection')) {
+        note = 'Top 20 Portfolio Selection · Closest near-miss contender';
+      } else if (category.includes('Rank')) {
         note = `Passed rules · Ranked #${sec.rank} (Top 20 cutoff)`;
-      } else if (categoryLabel.includes('Rule')) {
+      } else if (category.includes('Rule')) {
         note = 'Near threshold miss on knockout gate';
       } else {
         note = 'Evaluated in universe';
@@ -97,7 +103,7 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
     }
 
     return [
-      categoryLabel,
+      category,
       sec.rank !== null && sec.rank !== undefined ? sec.rank : '',
       sec.name || '',
       sec.ticker || '',
@@ -126,7 +132,7 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
 
   // Standard column widths for Excel presentation
   const colWidths = [
-    { wch: 25 }, // Category
+    { wch: 28 }, // Category
     { wch: 8 },  // Rank
     { wch: 30 }, // Security Name
     { wch: 10 }, // Ticker
@@ -142,7 +148,7 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
     { wch: 10 }, // Yield %
     { wch: 12 }, // EPS Growth %
     { wch: 16 }, // Data Confidence
-    { wch: 40 }, // Status / Note
+    { wch: 45 }, // Status / Note
   ];
 
   try {
@@ -150,7 +156,9 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
 
     // ─────────────────────────────────────────────────────────────
     // SHEET 1: Master "All Results (Categorized)"
-    // Layout: Top 20 first -> Near Misses directly after -> Remaining Universe
+    // Section 1: All 20 Top 20 stocks (1..20)
+    // Section 2: Near Misses (21..40 & gate misses) immediately after
+    // Section 3: Remaining Universe (41+)
     // ─────────────────────────────────────────────────────────────
     const masterData = [
       [`PORTFOLIO SCREENING RESULTS: ${profileName || 'ACTIVE STRATEGY'}`],
@@ -158,14 +166,21 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
       [],
       ['=== 🏆 SECTION 1: TOP 20 PORTFOLIO SELECTION ==='],
       headers,
-      ...top20Securities.map((s) => formatSecurityRow(s, 'Top 20 Portfolio')),
+      ...top20Securities.map((s) =>
+        formatSecurityRow(
+          s,
+          s.stageStatus === 'passed' ? 'Top 20 (Qualified)' : 'Top 20 (Near Miss Selection)'
+        )
+      ),
       [],
       ['=== ⚠️ SECTION 2: NEAR MISSES (CLOSEST CONTENDERS) ==='],
       headers,
       ...allNearMisses.map((s) =>
         formatSecurityRow(
           s,
-          isRankNearMiss(s) ? 'Near Miss (Rank #21-40)' : 'Near Miss (Rule Gate)'
+          (s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40))
+            ? 'Near Miss (Rank #21-40)'
+            : 'Near Miss (Rule Gate)'
         )
       ),
     ];
@@ -187,11 +202,16 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
     // SHEET 2: Dedicated "Top 20 Portfolio"
     // ─────────────────────────────────────────────────────────────
     const top20Data = [
-      [`TOP 20 PORTFOLIO WINNERS - ${profileName || 'Active Strategy'}`],
-      [`Export Date: ${dateStr}`, `Positions: ${top20Securities.length}`],
+      [`TOP 20 PORTFOLIO SELECTION - ${profileName || 'Active Strategy'}`],
+      [`Export Date: ${dateStr}`, `Total Positions: ${top20Securities.length}`],
       [],
       headers,
-      ...top20Securities.map((s) => formatSecurityRow(s, 'Top 20 Portfolio')),
+      ...top20Securities.map((s) =>
+        formatSecurityRow(
+          s,
+          s.stageStatus === 'passed' ? 'Top 20 (Qualified)' : 'Top 20 (Near Miss Selection)'
+        )
+      ),
     ];
     const wsTop20 = XLSX.utils.aoa_to_sheet(top20Data);
     wsTop20['!cols'] = colWidths;
@@ -202,16 +222,15 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
     // ─────────────────────────────────────────────────────────────
     const nearMissData = [
       [`NEAR MISS CONTENDERS - ${profileName || 'Active Strategy'}`],
-      [
-        `Export Date: ${dateStr}`,
-        `Total Near Misses: ${allNearMisses.length} (Rank Cutoff: ${rankNearMisses.length}, Rule Gate: ${ruleNearMisses.length})`,
-      ],
+      [`Export Date: ${dateStr}`, `Total Near Misses: ${allNearMisses.length}`],
       [],
       headers,
       ...allNearMisses.map((s) =>
         formatSecurityRow(
           s,
-          isRankNearMiss(s) ? 'Near Miss (Rank #21-40)' : 'Near Miss (Rule Gate)'
+          (s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40))
+            ? 'Near Miss (Rank #21-40)'
+            : 'Near Miss (Rule Gate)'
         )
       ),
     ];
@@ -222,19 +241,22 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
     // ─────────────────────────────────────────────────────────────
     // SHEET 4: Executive "Summary"
     // ─────────────────────────────────────────────────────────────
+    const qualifiedTop20Count = top20Securities.filter((s) => s.stageStatus === 'passed').length;
+    const filledTop20Count = top20Securities.length - qualifiedTop20Count;
+
     const summaryData = [
       ['Metric', 'Value'],
       ['Strategy Profile', profileName || 'Default Strategy'],
       ['Run Date', dateStr],
       ['Total Securities Evaluated', securities.length],
-      ['Top 20 Portfolio Selection', top20Securities.length],
-      ['Rank Near-Misses (Ranks 21-40)', rankNearMisses.length],
-      ['Rule Gate Near-Misses', ruleNearMisses.length],
-      ['Total Near Misses', allNearMisses.length],
-      ['Remaining Evaluated Securities', remainingUniverse.length],
+      ['Top 20 Portfolio Total', top20Securities.length],
+      ['  - Fully Qualified Winners', qualifiedTop20Count],
+      ['  - Near Miss Contender Selections', filledTop20Count],
+      ['Near Misses (Ranks 21-40 & Gate Misses)', allNearMisses.length],
+      ['Remaining Evaluated Universe', remainingUniverse.length],
     ];
     const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-    wsSummary['!cols'] = [{ wch: 30 }, { wch: 30 }];
+    wsSummary['!cols'] = [{ wch: 35 }, { wch: 30 }];
     XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
 
     // Trigger Excel download
@@ -247,7 +269,6 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
       remainingUniverse,
       headers,
       formatSecurityRow,
-      isRankNearMiss,
       cleanProfile,
       dateStr
     );
@@ -263,7 +284,6 @@ const fallbackCsvDownload = (
   remainingUniverse,
   headers,
   formatSecurityRow,
-  isRankNearMiss,
   cleanProfile,
   dateStr
 ) => {
@@ -276,26 +296,41 @@ const fallbackCsvDownload = (
   };
 
   const csvRows = [
-    [`### TOP 20 PORTFOLIO SELECTION ###`],
+    [`### SECTION 1: TOP 20 PORTFOLIO SELECTION ###`],
     headers.map(sanitizeCell).join(','),
-    ...top20Securities.map((s) => formatSecurityRow(s, 'Top 20 Portfolio').map(sanitizeCell).join(',')),
+    ...top20Securities.map((s) =>
+      formatSecurityRow(
+        s,
+        s.stageStatus === 'passed' ? 'Top 20 (Qualified)' : 'Top 20 (Near Miss Selection)'
+      )
+        .map(sanitizeCell)
+        .join(',')
+    ),
     [],
-    [`### NEAR MISSES (RANKS #21-40 & GATE MISSES) ###`],
+    [`### SECTION 2: NEAR MISSES (CLOSEST CONTENDERS) ###`],
     headers.map(sanitizeCell).join(','),
     ...allNearMisses.map((s) =>
       formatSecurityRow(
         s,
-        isRankNearMiss(s) ? 'Near Miss (Rank #21-40)' : 'Near Miss (Rule Gate)'
-      ).map(sanitizeCell).join(',')
+        (s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40))
+          ? 'Near Miss (Rank #21-40)'
+          : 'Near Miss (Rule Gate)'
+      )
+        .map(sanitizeCell)
+        .join(',')
     ),
   ];
 
   if (remainingUniverse.length > 0) {
     csvRows.push(
       [],
-      [`### REMAINING EVALUATED UNIVERSE ###`],
+      [`### SECTION 3: OTHER EVALUATED UNIVERSE ###`],
       headers.map(sanitizeCell).join(','),
-      ...remainingUniverse.map((s) => formatSecurityRow(s, 'Evaluated Universe').map(sanitizeCell).join(','))
+      ...remainingUniverse.map((s) =>
+        formatSecurityRow(s, 'Evaluated Universe')
+          .map(sanitizeCell)
+          .join(',')
+      )
     );
   }
 
