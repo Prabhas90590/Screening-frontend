@@ -28,6 +28,24 @@ export const ResultsTable = ({
     currentRun?.rules ||
     (activeProfile ? activeProfile.name : 'Active Model');
 
+  // ── DUAL HORIZONTAL SCROLLBAR SYNCHRONIZATION ──
+  const topScrollRef = React.useRef(null);
+  const tableScrollRef = React.useRef(null);
+  const isSyncingTop = React.useRef(false);
+  const isSyncingBottom = React.useRef(false);
+
+  const [tableScrollWidth, setTableScrollWidth] = React.useState(0);
+  const [hasHorizontalOverflow, setHasHorizontalOverflow] = React.useState(false);
+
+  const updateScrollWidth = React.useCallback(() => {
+    if (tableScrollRef.current) {
+      const sw = tableScrollRef.current.scrollWidth;
+      const cw = tableScrollRef.current.clientWidth;
+      setTableScrollWidth(sw);
+      setHasHorizontalOverflow(sw > cw + 1);
+    }
+  }, []);
+
   const countryValueByResultCountry = {
     US: 'United States',
     IN: 'India',
@@ -163,6 +181,54 @@ export const ResultsTable = ({
     });
   }, [tabSecurities, filterSector, filterRegion, filterCap, searchQuery]);
 
+  React.useEffect(() => {
+    updateScrollWidth();
+    const timer = setTimeout(updateScrollWidth, 80);
+
+    const ro = new ResizeObserver(() => {
+      updateScrollWidth();
+    });
+
+    if (tableScrollRef.current) {
+      ro.observe(tableScrollRef.current);
+    }
+    window.addEventListener('resize', updateScrollWidth);
+
+    return () => {
+      clearTimeout(timer);
+      ro.disconnect();
+      window.removeEventListener('resize', updateScrollWidth);
+    };
+  }, [updateScrollWidth, filteredSecurities, resultsTab]);
+
+  const handleTopScroll = () => {
+    if (isSyncingTop.current) {
+      isSyncingTop.current = false;
+      return;
+    }
+    isSyncingBottom.current = true;
+    if (tableScrollRef.current && topScrollRef.current) {
+      tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    }
+  };
+
+  const handleTableScroll = () => {
+    if (isSyncingBottom.current) {
+      isSyncingBottom.current = false;
+      return;
+    }
+    isSyncingTop.current = true;
+    if (topScrollRef.current && tableScrollRef.current) {
+      topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+    }
+  };
+
+  const scrollToPosition = (x) => {
+    if (tableScrollRef.current) {
+      tableScrollRef.current.scrollTo({ left: x, behavior: 'smooth' });
+    }
+  };
+
   // Empty state rendering
   if (filteredSecurities.length === 0) {
     let emptyTitle = 'No Securities Found';
@@ -186,7 +252,58 @@ export const ResultsTable = ({
   return (
     <div className="space-y-2">
       <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Top Synchronized Horizontal Scrollbar */}
+        {hasHorizontalOverflow && (
+          <div className="bg-slate-50/95 border-b border-slate-200/80">
+            {/* Quick Navigation & Helper Header */}
+            <div className="px-3.5 py-1.5 flex items-center justify-between gap-2 text-[11px] text-slate-500 bg-slate-50">
+              <span className="flex items-center gap-1.5 font-medium text-slate-600">
+                <span className="text-[#147b73] font-bold text-xs">↔</span>
+                <span>Top Scrollbar · Scroll right to view all sections in this tab</span>
+              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => scrollToPosition(0)}
+                  className="px-2 py-0.5 rounded bg-white border border-slate-200 hover:bg-slate-100 text-[10px] font-semibold text-slate-600 transition-colors cursor-pointer"
+                >
+                  ⇤ Rank &amp; Ticker
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollToPosition(tableScrollWidth * 0.45)}
+                  className="px-2 py-0.5 rounded bg-white border border-slate-200 hover:bg-slate-100 text-[10px] font-semibold text-slate-600 transition-colors cursor-pointer"
+                >
+                  Cause &amp; Attribution
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollToPosition(tableScrollWidth)}
+                  className="px-2 py-0.5 rounded bg-white border border-slate-200 hover:bg-slate-100 text-[10px] font-semibold text-slate-600 transition-colors cursor-pointer"
+                >
+                  Valuation &amp; Decision ⇥
+                </button>
+              </div>
+            </div>
+
+            {/* Native Top Scrollbar Track */}
+            <div
+              ref={topScrollRef}
+              onScroll={handleTopScroll}
+              className="overflow-x-auto overflow-y-hidden custom-top-scrollbar bg-slate-100/70 border-t border-slate-200/60"
+              style={{ height: '14px' }}
+            >
+              <div style={{ width: `${tableScrollWidth}px`, height: '1px' }} />
+            </div>
+          </div>
+        )}
+
+        {/* Main Table Scroll Container (with Bottom Scrollbar) */}
+        <div
+          ref={tableScrollRef}
+          onScroll={handleTableScroll}
+          className="overflow-x-auto custom-table-scrollbar"
+        >
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
