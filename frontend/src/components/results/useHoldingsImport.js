@@ -135,7 +135,12 @@ export const useHoldingsImport = (securities = []) => {
             (s.ticker && ph.ticker && s.ticker.toUpperCase() === ph.ticker.toUpperCase())
         );
 
+        const holdingRank = ph.holding_rank ?? ph.holdingRank ?? null;
+
         if (screenedMatch) {
+          const currentRank = screenedMatch.rank ?? null;
+          const rankDelta = (currentRank !== null && holdingRank !== null) ? (holdingRank - currentRank) : null;
+
           const isTop20 = (screenedMatch.rank && screenedMatch.rank <= 20) || 
                           (screenedMatch.stageStatus === 'passed' && screenedMatch.rank <= 20);
           const isRankNearMiss = screenedMatch.nearMissStatus === 'rank_near_miss' || 
@@ -163,6 +168,10 @@ export const useHoldingsImport = (securities = []) => {
             weightPct: ph.weight_pct,
             portfolioName: ph.portfolio_name,
             isHolding: true,
+            holdingRank,
+            currentRank,
+            holdingRankDelta: rankDelta,
+            rankDelta,
             comparisonStatus,
             comparisonVerdict,
             recommendedAction,
@@ -179,6 +188,10 @@ export const useHoldingsImport = (securities = []) => {
           sector: ph.sector || 'Unclassified',
           score: '—',
           rank: null,
+          currentRank: null,
+          holdingRank,
+          holdingRankDelta: null,
+          rankDelta: null,
           fwdPe: null,
           peg: null,
           evEbitda: null,
@@ -210,6 +223,10 @@ export const useHoldingsImport = (securities = []) => {
     .map((s) => ({
       ...s,
       isBuyCandidate: true,
+      currentRank: s.rank,
+      holdingRank: null,
+      holdingRankDelta: null,
+      rankDelta: null,
       comparisonStatus: 'buy_candidate',
       comparisonVerdict: '★ Top 20 Buy Idea (Not Held)',
       recommendedAction: 'Buy',

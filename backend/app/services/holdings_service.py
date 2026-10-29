@@ -133,6 +133,7 @@ class HoldingsService:
         shares_col = self._detect_column(headers, ["shares", "quantity", "qty", "units", "position"])
         cost_col = self._detect_column(headers, ["pricepershare", "costbasis", "cost", "price", "avgcost", "purchaseprice"])
         weight_col = self._detect_column(headers, ["allocation", "weight", "weightpct", "weightpercentage", "pct"])
+        rank_col = self._detect_column(headers, ["rank", "holdingrank", "modelrank", "position", "#", "rankinholdings"])
 
         if not ticker_col:
             return HoldingsImportResponse(
@@ -190,6 +191,17 @@ class HoldingsService:
             if 0.0 < weight < 1.0:
                 weight = round(weight * 100.0, 2)
 
+            # Determine rank in holdings: from uploaded rank column or row order
+            holding_rank = None
+            if rank_col and row.get(rank_col):
+                clean_rank = str(row.get(rank_col)).replace("#", "").strip()
+                try:
+                    holding_rank = int(float(clean_rank))
+                except (ValueError, TypeError):
+                    holding_rank = idx + 1
+            else:
+                holding_rank = idx + 1
+
             holding_id = f"hld-{company.canonical_id}-{port_slug}"
             matched_records.append(
                 HoldingRecord(
@@ -199,6 +211,7 @@ class HoldingsService:
                     shares=shares,
                     cost_basis=cost_basis,
                     weight_pct=weight,
+                    holding_rank=holding_rank,
                 )
             )
 
@@ -376,6 +389,7 @@ class HoldingsService:
             shares=request.shares or 0.0,
             cost_basis=request.cost_basis or 0.0,
             weight_pct=request.weight_pct or 0.0,
+            holding_rank=request.holding_rank,
         )
         self.repo.save_holding(record)
 
@@ -395,6 +409,7 @@ class HoldingsService:
             shares=record.shares,
             cost_basis=record.cost_basis,
             weight_pct=record.weight_pct,
+            holding_rank=record.holding_rank,
             portfolio_name=record.portfolio_name,
             created_at=record.created_at,
         )
@@ -441,6 +456,7 @@ class HoldingsService:
             shares=d.shares,
             cost_basis=d.cost_basis,
             weight_pct=d.weight_pct,
+            holding_rank=d.holding_rank,
             portfolio_name=d.portfolio_name,
             created_at=d.created_at,
         )

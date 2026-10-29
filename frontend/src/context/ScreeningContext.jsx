@@ -1399,6 +1399,7 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
         setScreeningError,
         setScreeningRunSuccess,
         profiles,
+        activeProfile,
         activateProfile,
         versionHistory,
         restoreVersion,

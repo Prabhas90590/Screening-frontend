@@ -25,21 +25,23 @@ class HoldingsRepository:
         insert_sql = """
             INSERT INTO holdings (
                 holding_id, canonical_company_id, portfolio_name,
-                shares, cost_basis, weight_pct, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                shares, cost_basis, weight_pct, holding_rank, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (holding_id) DO UPDATE SET
                 shares = EXCLUDED.shares,
                 cost_basis = EXCLUDED.cost_basis,
-                weight_pct = EXCLUDED.weight_pct;
+                weight_pct = EXCLUDED.weight_pct,
+                holding_rank = EXCLUDED.holding_rank;
         """ if is_postgres else """
             INSERT INTO holdings (
                 holding_id, canonical_company_id, portfolio_name,
-                shares, cost_basis, weight_pct, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                shares, cost_basis, weight_pct, holding_rank, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (holding_id) DO UPDATE SET
                 shares = excluded.shares,
                 cost_basis = excluded.cost_basis,
-                weight_pct = excluded.weight_pct;
+                weight_pct = excluded.weight_pct,
+                holding_rank = excluded.holding_rank;
         """
 
         created_at_val = holding.created_at if is_postgres else holding.created_at.isoformat()
@@ -50,6 +52,7 @@ class HoldingsRepository:
             holding.shares,
             holding.cost_basis,
             holding.weight_pct,
+            holding.holding_rank,
             created_at_val,
         )
 
@@ -80,12 +83,13 @@ class HoldingsRepository:
             sql = """
                 INSERT INTO holdings (
                     holding_id, canonical_company_id, portfolio_name,
-                    shares, cost_basis, weight_pct, created_at
+                    shares, cost_basis, weight_pct, holding_rank, created_at
                 ) VALUES %s
                 ON CONFLICT (holding_id) DO UPDATE SET
                     shares = EXCLUDED.shares,
                     cost_basis = EXCLUDED.cost_basis,
-                    weight_pct = EXCLUDED.weight_pct;
+                    weight_pct = EXCLUDED.weight_pct,
+                    holding_rank = EXCLUDED.holding_rank;
             """
             values_list = [
                 (
@@ -95,6 +99,7 @@ class HoldingsRepository:
                     h.shares,
                     h.cost_basis,
                     h.weight_pct,
+                    h.holding_rank,
                     h.created_at,
                 )
                 for h in deduped
@@ -124,10 +129,14 @@ class HoldingsRepository:
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
 
         if portfolio_name:
-            query = "SELECT * FROM holdings WHERE portfolio_name = %s ORDER BY weight_pct DESC" if is_postgres else "SELECT * FROM holdings WHERE portfolio_name = ? ORDER BY weight_pct DESC"
+            query = (
+                "SELECT * FROM holdings WHERE portfolio_name = %s ORDER BY COALESCE(holding_rank, 999999) ASC, weight_pct DESC"
+                if is_postgres
+                else "SELECT * FROM holdings WHERE portfolio_name = ? ORDER BY COALESCE(holding_rank, 999999) ASC, weight_pct DESC"
+            )
             params = (portfolio_name,)
         else:
-            query = "SELECT * FROM holdings ORDER BY weight_pct DESC"
+            query = "SELECT * FROM holdings ORDER BY COALESCE(holding_rank, 999999) ASC, weight_pct DESC"
             params = ()
 
         try:
@@ -158,15 +167,20 @@ class HoldingsRepository:
                 COALESCE(c.primary_exchange, 'NYSE') AS exchange,
                 COALESCE(c.sector, 'Unclassified') AS sector,
                 c.market_cap_display,
-                c.market_cap
+                c.market_cap,
+                h.holding_rank
             FROM holdings h
             LEFT JOIN companies c ON h.canonical_company_id = c.canonical_id
         """
         if portfolio_name:
-            query += " WHERE h.portfolio_name = %s ORDER BY h.weight_pct DESC" if is_postgres else " WHERE h.portfolio_name = ? ORDER BY h.weight_pct DESC"
+            query += (
+                " WHERE h.portfolio_name = %s ORDER BY COALESCE(h.holding_rank, 999999) ASC, h.weight_pct DESC"
+                if is_postgres
+                else " WHERE h.portfolio_name = ? ORDER BY COALESCE(h.holding_rank, 999999) ASC, h.weight_pct DESC"
+            )
             params = (portfolio_name,)
         else:
-            query += " ORDER BY h.weight_pct DESC"
+            query += " ORDER BY COALESCE(h.holding_rank, 999999) ASC, h.weight_pct DESC"
             params = ()
 
         try:
@@ -191,6 +205,7 @@ class HoldingsRepository:
                             exchange=row[10],
                             sector=row[11],
                             market_cap_display=float(row[12]) if row[12] is not None else None,
+                            holding_rank=int(row[14]) if (len(row) > 14 and row[14] is not None) else None,
                         )
                     )
                 else:
@@ -209,6 +224,7 @@ class HoldingsRepository:
                             exchange=row["exchange"],
                             sector=row["sector"],
                             market_cap_display=float(row["market_cap_display"]) if row["market_cap_display"] is not None else None,
+                            holding_rank=int(row["holding_rank"]) if ("holding_rank" in row and row["holding_rank"] is not None) else None,
                         )
                     )
             return results
@@ -259,7 +275,8 @@ class HoldingsRepository:
                 shares=float(row[3] or 0.0),
                 cost_basis=float(row[4] or 0.0),
                 weight_pct=float(row[5] or 0.0),
-                created_at=row[6] if isinstance(row[6], datetime) else datetime.fromisoformat(str(row[6])),
+                holding_rank=int(row[6]) if (len(row) > 7 and row[6] is not None) else None,
+                created_at=row[7] if (len(row) > 7 and isinstance(row[7], datetime)) else (row[6] if isinstance(row[6], datetime) else datetime.utcnow()),
             )
         else:
             return HoldingRecord(
@@ -269,6 +286,7 @@ class HoldingsRepository:
                 shares=float(row["shares"] or 0.0),
                 cost_basis=float(row["cost_basis"] or 0.0),
                 weight_pct=float(row["weight_pct"] or 0.0),
+                holding_rank=int(row["holding_rank"]) if ("holding_rank" in row and row["holding_rank"] is not None) else None,
                 created_at=datetime.fromisoformat(str(row["created_at"])),
             )
 

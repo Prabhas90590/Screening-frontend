@@ -17,6 +17,7 @@ class HoldingItemSchema(BaseModel):
     shares: float = 0.0
     cost_basis: float = 0.0
     weight_pct: float = 0.0
+    holding_rank: Optional[int] = None
     portfolio_name: str = "Core Equity Fund"
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -29,6 +30,7 @@ class CreateHoldingRequest(BaseModel):
     shares: Optional[float] = Field(default=0.0, description="Quantity of shares held")
     cost_basis: Optional[float] = Field(default=0.0, description="Total or per-share cost basis")
     weight_pct: Optional[float] = Field(default=0.0, description="Portfolio weighting percentage (0..100)")
+    holding_rank: Optional[int] = Field(default=None, description="Rank in portfolio or screening run")
     portfolio_name: Optional[str] = Field(default="Core Equity Fund", description="Fund / Portfolio name")
 
 

@@ -20,7 +20,13 @@ export const ResultsTable = ({
     resultsTab,
     changesSubTab,
     nearMissSubTab,
+    currentRun,
+    activeProfile,
   } = useScreening();
+
+  const activeProfileName =
+    currentRun?.rules ||
+    (activeProfile ? activeProfile.name : 'Active Model');
 
   const countryValueByResultCountry = {
     US: 'United States',
@@ -35,6 +41,30 @@ export const ResultsTable = ({
     IT: 'Italy',
     ES: 'Spain',
   };
+
+  const enrichWithHoldings = React.useCallback(
+    (list) => {
+      return list.map((s) => {
+        if (s.isHolding || s.isBuyCandidate) return s;
+        const isHeld = holdingTickerSet?.has(s.ticker?.toUpperCase());
+        const holdingMatch = isHeld
+          ? (holdings || []).find((h) => h.ticker?.toUpperCase() === s.ticker?.toUpperCase())
+          : null;
+        const holdingRank = holdingMatch?.holdingRank ?? null;
+        const currentRank = s.rank ?? null;
+        const holdingRankDelta =
+          currentRank !== null && holdingRank !== null ? holdingRank - currentRank : null;
+        return {
+          ...s,
+          isHeld,
+          holdingRank,
+          holdingRankDelta,
+          holdingWeight: holdingMatch?.weightPct,
+        };
+      });
+    },
+    [holdings, holdingTickerSet]
+  );
 
   // Filter securities by primary tab and sub-pills
   const tabSecurities = React.useMemo(() => {
@@ -55,22 +85,24 @@ export const ResultsTable = ({
     }
 
     if (resultsTab === 'allScreened') {
-      return securities;
+      return enrichWithHoldings(securities);
     }
 
     if (resultsTab === 'changes') {
-      return securities.filter((s) => {
+      const filtered = securities.filter((s) => {
         const isEntered = s.deltaStatus === 'entered' || s.rankDelta === 'NEW';
         const isExited = s.deltaStatus === 'exited' || s.rankDelta === 'EXITED';
         if (changesSubTab === 'entered') return isEntered;
         if (changesSubTab === 'exited') return isExited;
         return isEntered || isExited;
       });
+      return enrichWithHoldings(filtered);
     }
 
     if (resultsTab === 'nearMisses') {
-      return securities.filter((s) => {
-        const isRankMiss = s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40);
+      const filtered = securities.filter((s) => {
+        const isRankMiss =
+          s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40);
         const isRuleMiss =
           s.nearMissStatus === 'rule_near_miss' ||
           s.deltaStatus === 'rule_miss' ||
@@ -82,27 +114,26 @@ export const ResultsTable = ({
         if (nearMissSubTab === 'rule') return isRuleMiss;
         return isRankMiss || isRuleMiss;
       });
+      return enrichWithHoldings(filtered);
     }
 
     // Default: 'top20' (only actively qualified top 20 securities)
-    return securities
-      .filter(
-        (s) =>
-          (s.stageStatus === 'passed' && s.rank <= 20) ||
-          (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited')
-      )
-      .map((s) => {
-        const isHeld = holdingTickerSet?.has(s.ticker?.toUpperCase());
-        const holdingMatch = isHeld
-          ? (holdings || []).find((h) => h.ticker?.toUpperCase() === s.ticker?.toUpperCase())
-          : null;
-        return {
-          ...s,
-          isHeld,
-          holdingWeight: holdingMatch?.weightPct,
-        };
-      });
-  }, [resultsTab, changesSubTab, nearMissSubTab, holdingsSubTab, securities, holdings, buyCandidates, holdingTickerSet]);
+    const top20List = securities.filter(
+      (s) =>
+        (s.stageStatus === 'passed' && s.rank <= 20) ||
+        (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited')
+    );
+    return enrichWithHoldings(top20List);
+  }, [
+    resultsTab,
+    changesSubTab,
+    nearMissSubTab,
+    holdingsSubTab,
+    securities,
+    holdings,
+    buyCandidates,
+    enrichWithHoldings,
+  ]);
 
   // Secondary filters: sector, region, cap, and search query
   const filteredSecurities = React.useMemo(() => {
@@ -157,7 +188,12 @@ export const ResultsTable = ({
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                <th className="py-3 px-3.5 w-12 text-center">#</th>
+                <th className="py-3 px-3 text-center whitespace-nowrap min-w-[125px]">
+                  Rank ({activeProfileName})
+                </th>
+                <th className="py-3 px-3 text-center whitespace-nowrap min-w-[115px]">
+                  Holding Rank
+                </th>
                 <th className="py-3 px-3.5 min-w-[200px]">Security &amp; Ticker</th>
                 <th className="py-3 px-3.5 whitespace-nowrap">Sector</th>
                 <th className="py-3 px-3.5 whitespace-nowrap">Score</th>
@@ -199,14 +235,57 @@ export const ResultsTable = ({
                         : ''
                     }`}
                   >
-                    {/* 1. Rank */}
-                    <td className="py-3.5 px-3.5 text-center text-slate-500 font-mono text-[11px] whitespace-nowrap">
+                    {/* 1. Rank in Active Screening Profile */}
+                    <td className="py-3.5 px-3 text-center font-mono text-[11px] whitespace-nowrap">
                       {item.rank !== null && item.rank !== undefined ? (
-                        <span className="font-semibold text-slate-700">#{item.rank}</span>
+                        <span className="font-bold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded text-xs border border-slate-200">
+                          #{item.rank}
+                        </span>
                       ) : item.prevRank ? (
-                        <span className="text-rose-500 line-through">#{item.prevRank}</span>
+                        <span className="text-rose-500 line-through text-xs">#{item.prevRank}</span>
                       ) : (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-400 font-mono text-xs">—</span>
+                      )}
+                    </td>
+
+                    {/* 2. Rank in Holdings (with rank shift comparison) */}
+                    <td className="py-3.5 px-3 text-center font-mono text-[11px] whitespace-nowrap">
+                      {item.holdingRank !== null && item.holdingRank !== undefined ? (
+                        <div className="inline-flex items-center gap-1 justify-center">
+                          <span className="font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200/80 text-xs">
+                            #{item.holdingRank}
+                          </span>
+                          {item.holdingRankDelta !== null && item.holdingRankDelta !== undefined && (
+                            item.holdingRankDelta > 0 ? (
+                              <span
+                                className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200/60"
+                                title={`Holding #${item.holdingRank} improved to #${item.rank} (+${item.holdingRankDelta})`}
+                              >
+                                ▲ +{item.holdingRankDelta}
+                              </span>
+                            ) : item.holdingRankDelta < 0 ? (
+                              <span
+                                className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1 py-0.5 rounded border border-rose-200/60"
+                                title={`Holding #${item.holdingRank} dropped to #${item.rank} (${item.holdingRankDelta})`}
+                              >
+                                ▼ {item.holdingRankDelta}
+                              </span>
+                            ) : (
+                              <span
+                                className="text-[10px] font-semibold text-slate-400"
+                                title="Holding rank matches model rank"
+                              >
+                                =
+                              </span>
+                            )
+                          )}
+                        </div>
+                      ) : item.isBuyCandidate ? (
+                        <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                          Not Held
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 text-xs">—</span>
                       )}
                     </td>
 
@@ -299,11 +378,19 @@ export const ResultsTable = ({
                         <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[10px] font-bold text-rose-700">
                           ▼ EXITED
                         </span>
-                      ) : item.rankDelta?.startsWith('+') ? (
+                      ) : typeof item.rankDelta === 'string' && item.rankDelta.startsWith('+') ? (
                         <span className="inline-flex items-center gap-0.5 font-bold text-emerald-600 font-mono text-[11px]">
                           ▲ {item.rankDelta}
                         </span>
-                      ) : item.rankDelta?.startsWith('-') ? (
+                      ) : typeof item.rankDelta === 'string' && item.rankDelta.startsWith('-') ? (
+                        <span className="inline-flex items-center gap-0.5 font-bold text-rose-600 font-mono text-[11px]">
+                          ▼ {item.rankDelta}
+                        </span>
+                      ) : typeof item.rankDelta === 'number' && item.rankDelta > 0 ? (
+                        <span className="inline-flex items-center gap-0.5 font-bold text-emerald-600 font-mono text-[11px]">
+                          ▲ +{item.rankDelta}
+                        </span>
+                      ) : typeof item.rankDelta === 'number' && item.rankDelta < 0 ? (
                         <span className="inline-flex items-center gap-0.5 font-bold text-rose-600 font-mono text-[11px]">
                           ▼ {item.rankDelta}
                         </span>

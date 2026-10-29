@@ -265,6 +265,7 @@ CREATE TABLE IF NOT EXISTS holdings (
     shares DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     cost_basis DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     weight_pct DOUBLE PRECISION DEFAULT 0.0,
+    holding_rank INTEGER DEFAULT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -539,6 +540,7 @@ CREATE TABLE IF NOT EXISTS holdings (
     shares DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     cost_basis DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     weight_pct DOUBLE PRECISION DEFAULT 0.0,
+    holding_rank INTEGER DEFAULT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -712,6 +714,7 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE screening_results ADD COLUMN IF NOT EXISTS revenue_growth_fwd DOUBLE PRECISION;")
                 cursor.execute("ALTER TABLE screening_results ADD COLUMN IF NOT EXISTS avg_daily_volume DOUBLE PRECISION;")
                 cursor.execute("ALTER TABLE screening_results ADD COLUMN IF NOT EXISTS avg_daily_traded_value DOUBLE PRECISION;")
+                cursor.execute("ALTER TABLE holdings ADD COLUMN IF NOT EXISTS holding_rank INTEGER;")
                 conn.commit()
                 logger.info("PostgreSQL persistence tables verified/created successfully.")
             else:

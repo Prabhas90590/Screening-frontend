@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   AlertCircle,
   ArrowUpRight,
+  ArrowUpDown,
   CheckCircle2,
   ChevronRight,
   HelpCircle,
@@ -26,10 +27,16 @@ export const SecurityDetailDrawer = () => {
     securities = [],
     sectorLimits = {},
     diversification = {},
+    currentRun,
+    activeProfile,
   } = useScreening();
 
   const [localReason, setLocalReason] = useState('');
   const [localNote, setLocalNote] = useState('');
+
+  const activeProfileName =
+    currentRun?.rules ||
+    (activeProfile ? activeProfile.name : 'Active Model');
 
   useEffect(() => {
     if (selectedSecurity) {
@@ -244,6 +251,208 @@ export const SecurityDetailDrawer = () => {
       </div>
 
       <div className="p-6 space-y-6 text-slate-700">
+        {/* ── 0. PORTFOLIO HOLDINGS & DUAL-RANK COMPARISON CARD ── */}
+        <div className="rounded-xl border border-teal-200 bg-white p-4 text-xs space-y-3 shadow-xs">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+            <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[11px] text-teal-800">
+              <ArrowUpDown size={15} className="text-[#147b73]" />
+              <span>Holdings vs Model Comparison</span>
+            </div>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                selectedSecurity.isHolding
+                  ? 'bg-teal-50 text-teal-800 border-teal-200'
+                  : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+              }`}
+            >
+              {selectedSecurity.isHolding ? 'Held in Portfolio' : 'Not in Holdings'}
+            </span>
+          </div>
+
+          {/* Two-column Comparison Grid */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* Box 1: Current Screening Profile */}
+            <div className="rounded-lg border border-slate-200/90 bg-slate-50/70 p-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block truncate" title={activeProfileName}>
+                Active Screen ({activeProfileName})
+              </span>
+              <div className="mt-1 flex items-baseline gap-1.5">
+                <span className="text-xl font-extrabold text-slate-900 font-mono">
+                  {selectedSecurity.rank !== null && selectedSecurity.rank !== undefined
+                    ? `#${selectedSecurity.rank}`
+                    : '—'}
+                </span>
+                {selectedSecurity.rank && selectedSecurity.rank <= 20 && (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200/70">
+                    Top 20
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Score: <strong className="text-slate-800 font-mono">{selectedSecurity.score ?? '—'}</strong> / 100
+              </p>
+            </div>
+
+            {/* Box 2: Uploaded Holdings */}
+            <div className="rounded-lg border border-teal-200/80 bg-teal-50/40 p-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 block truncate" title={selectedSecurity.portfolioName || 'Client Portfolio'}>
+                Client Holdings ({selectedSecurity.portfolioName || 'Portfolio'})
+              </span>
+              <div className="mt-1 flex items-baseline gap-1.5">
+                <span className="text-xl font-extrabold text-teal-900 font-mono">
+                  {selectedSecurity.holdingRank !== null && selectedSecurity.holdingRank !== undefined
+                    ? `#${selectedSecurity.holdingRank}`
+                    : selectedSecurity.isHolding
+                    ? 'Held'
+                    : 'Not Held'}
+                </span>
+                {selectedSecurity.weightPct > 0 && (
+                  <span className="text-[10px] font-bold text-teal-800 bg-teal-100/70 px-1.5 py-0.2 rounded border border-teal-200">
+                    {selectedSecurity.weightPct}%
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-teal-700 mt-1">
+                {selectedSecurity.shares > 0
+                  ? `${selectedSecurity.shares.toLocaleString()} shares held`
+                  : selectedSecurity.isHolding
+                  ? 'Position recorded'
+                  : 'Candidate for inclusion'}
+              </p>
+            </div>
+          </div>
+
+          {/* Difference & Shift Banner */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-3 space-y-1.5">
+            <div className="flex items-center justify-between flex-wrap gap-1">
+              <span className="text-[11px] font-bold text-slate-700">Rank Difference & Movement:</span>
+              {(() => {
+                const delta =
+                  typeof selectedSecurity.holdingRankDelta === 'number'
+                    ? selectedSecurity.holdingRankDelta
+                    : typeof selectedSecurity.rankDelta === 'number'
+                    ? selectedSecurity.rankDelta
+                    : null;
+
+                if (delta !== null) {
+                  if (delta > 0) {
+                    return (
+                      <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-mono">
+                        ▲ +{delta} Rank Improvement
+                      </span>
+                    );
+                  }
+                  if (delta < 0) {
+                    return (
+                      <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200 font-mono">
+                        ▼ {delta} Rank Drop
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 font-mono">
+                      = Unchanged (#{selectedSecurity.rank})
+                    </span>
+                  );
+                }
+
+                if (selectedSecurity.isBuyCandidate) {
+                  return (
+                    <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                      ★ New Buy Idea
+                    </span>
+                  );
+                }
+
+                if (isExited) {
+                  return (
+                    <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                      ▼ Exited Active Screen
+                    </span>
+                  );
+                }
+
+                return (
+                  <span className="text-[11px] font-medium text-slate-500">
+                    Unscreened in active run
+                  </span>
+                );
+              })()}
+            </div>
+
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              {(() => {
+                const delta =
+                  typeof selectedSecurity.holdingRankDelta === 'number'
+                    ? selectedSecurity.holdingRankDelta
+                    : typeof selectedSecurity.rankDelta === 'number'
+                    ? selectedSecurity.rankDelta
+                    : null;
+
+                if (delta !== null) {
+                  if (delta > 0) {
+                    return (
+                      <>
+                        Holding <strong>#{selectedSecurity.holdingRank}</strong> gained <strong>+{delta} spots</strong>, moving up to <strong>Rank #{selectedSecurity.rank}</strong> under <em>{activeProfileName}</em>.
+                      </>
+                    );
+                  }
+                  if (delta < 0) {
+                    return (
+                      <>
+                        Holding <strong>#{selectedSecurity.holdingRank}</strong> slipped <strong>{Math.abs(delta)} spots</strong> to <strong>Rank #{selectedSecurity.rank}</strong> under <em>{activeProfileName}</em>.
+                      </>
+                    );
+                  }
+                  return (
+                    <>
+                      Holding rank matches active model rank at <strong>#{selectedSecurity.rank}</strong>.
+                    </>
+                  );
+                }
+
+                if (selectedSecurity.isBuyCandidate) {
+                  return (
+                    <>
+                      Top 20 high-conviction winner under <em>{activeProfileName}</em> (Rank #{selectedSecurity.rank}). Not currently held in client portfolio.
+                    </>
+                  );
+                }
+
+                if (isExited) {
+                  return (
+                    <>
+                      Held in client portfolio (Holding #{selectedSecurity.holdingRank || '—'}), but disqualified because it breached fundamental knockout floors in <em>{activeProfileName}</em>.
+                    </>
+                  );
+                }
+
+                return (
+                  <>
+                    Position held in portfolio but outside the regional screening universe of <em>{activeProfileName}</em>.
+                  </>
+                );
+              })()}
+            </p>
+
+            {/* Quick Action Suggestion */}
+            <div className="pt-2 border-t border-slate-200/70 flex items-center justify-between text-[11px]">
+              <span className="font-semibold text-slate-600">Model Recommendation:</span>
+              <span className="font-bold text-slate-900">
+                {selectedSecurity.comparisonStatus === 'held_in_top20'
+                  ? '✅ Recommend KEEP (Model Top 20 Winner)'
+                  : selectedSecurity.comparisonStatus === 'held_exited' || isExited
+                  ? '❌ Recommend DROP (Failed Knockout Rules)'
+                  : selectedSecurity.isBuyCandidate
+                  ? '⭐ Recommend BUY (New Top 20 Idea)'
+                  : selectedSecurity.comparisonStatus === 'held_rank_miss'
+                  ? '⚠️ Recommend REVIEW (Rank Near-Miss)'
+                  : 'Hold / Retain'}
+              </span>
+            </div>
+          </div>
+        </div>
+
         {/* ── 1. EXECUTIVE QUALIFICATION SUMMARY CARD ── */}
         <div
           className={`rounded-xl border p-4 text-xs space-y-2.5 shadow-xs ${
