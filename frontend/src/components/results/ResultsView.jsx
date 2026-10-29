@@ -5,7 +5,7 @@ import { ResultsTable } from './ResultsTable';
 import { SecurityDetailDrawer } from './SecurityDetailDrawer';
 import { ResultsLegend } from './ResultsLegend';
 import { useHoldingsImport } from './useHoldingsImport';
-import { exportResultsToCsv } from './exportResults';
+import { exportResultsToExcel } from './exportResults';
 import { useScreening } from '../../context/ScreeningContext';
 
 export const ResultsView = () => {
@@ -31,7 +31,7 @@ export const ResultsView = () => {
           {...holdingsImport}
           holdingsSubTab={holdingsSubTab}
           setHoldingsSubTab={setHoldingsSubTab}
-          exportResults={() => exportResultsToCsv(securities, activeProfileName)}
+          exportResults={() => exportResultsToExcel(securities, activeProfileName)}
         />
 
         {/* 3. Streamlined 7-Column Results Table */}

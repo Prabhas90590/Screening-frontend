@@ -37,13 +37,22 @@ export const ResultsFilterBar = ({
   const selectedCountries = countries.filter((country) => country.selected);
   const selectedSectors = sectors.filter((sector) => sector.selected);
 
-  const top20Count = securities.filter(
-    (s) => (s.stageStatus === 'passed' && s.rank <= 20) || (s.rank && s.rank <= 20 && s.deltaStatus !== 'exited')
-  ).length || 20;
+  const isTop20 = (s) =>
+    (s.stageStatus === 'passed' && s.rank !== null && s.rank <= 20) ||
+    (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited');
 
-  const nearMissCount = securities.filter(
-    (s) => s.nearMissStatus === 'rule_near_miss' || s.nearMissStatus === 'rank_near_miss' || s.deltaStatus === 'rule_miss'
-  ).length;
+  const top20Count = securities.filter(isTop20).length || (securities.length > 0 ? 20 : 0);
+
+  const nearMissCount = securities.filter((s) => {
+    if (isTop20(s)) return false;
+    const isRankMiss =
+      s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40);
+    const isRuleMiss =
+      s.nearMissStatus === 'rule_near_miss' ||
+      s.deltaStatus === 'rule_miss' ||
+      s.rankDelta === 'RULE_MISS';
+    return isRankMiss || isRuleMiss;
+  }).length;
 
   const enteredCount = securities.filter(
     (s) => s.deltaStatus === 'entered' || s.rankDelta === 'NEW'

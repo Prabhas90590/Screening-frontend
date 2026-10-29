@@ -152,13 +152,19 @@ export const SecurityDetailDrawer = () => {
     selectedSecurity.deltaStatus === 'entered' ||
     selectedSecurity.rankDelta === 'NEW';
 
+  const isTop20 = !isExited && selectedSecurity.rank && selectedSecurity.rank <= 20;
+
   const isRankNearMiss =
-    selectedSecurity.nearMissStatus === 'rank_near_miss' ||
-    (selectedSecurity.rank && selectedSecurity.rank >= 21 && selectedSecurity.rank <= 40);
+    !isTop20 &&
+    !isExited &&
+    (selectedSecurity.nearMissStatus === 'rank_near_miss' ||
+      (selectedSecurity.rank && selectedSecurity.rank >= 21 && selectedSecurity.rank <= 40));
 
   const isRuleNearMiss =
-    selectedSecurity.nearMissStatus === 'rule_near_miss' ||
-    selectedSecurity.deltaStatus === 'rule_miss';
+    !isTop20 &&
+    !isExited &&
+    (selectedSecurity.nearMissStatus === 'rule_near_miss' ||
+      selectedSecurity.deltaStatus === 'rule_miss');
 
   const hasBankExemption = normalizedMetrics.some((m) => m.status === 'exempt');
   const failedGates = knockoutGates.filter((g) => !g.passed && g.status !== 'exempt');
@@ -195,6 +201,11 @@ export const SecurityDetailDrawer = () => {
             {isRankNearMiss && !isExited && (
               <span className="rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
                 NEAR MISS · RANK #{selectedSecurity.rank}
+              </span>
+            )}
+            {isRuleNearMiss && !isExited && (
+              <span className="rounded bg-rose-50 border border-rose-200 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
+                RULE NEAR MISS
               </span>
             )}
           </div>

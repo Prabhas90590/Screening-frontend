@@ -101,17 +101,21 @@ export const ResultsTable = ({
 
     if (resultsTab === 'nearMisses') {
       const filtered = securities.filter((s) => {
+        // Exclude Top 20 stocks completely - Top 20 winners must never appear under Near Misses
+        const isTop20 =
+          (s.stageStatus === 'passed' && s.rank !== null && s.rank <= 20) ||
+          (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited');
+        if (isTop20) return false;
+
         const isRankMiss =
           s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40);
         const isRuleMiss =
           s.nearMissStatus === 'rule_near_miss' ||
           s.deltaStatus === 'rule_miss' ||
-          s.rankDelta === 'RULE_MISS' ||
-          Object.values(s.metricStatuses || {}).some(
-            (status) => status === 'threshold' || status === 'miss'
-          );
+          s.rankDelta === 'RULE_MISS';
+
         if (nearMissSubTab === 'rank') return isRankMiss;
-        if (nearMissSubTab === 'rule') return isRuleMiss;
+        if (nearMissSubTab === 'rule') return isRuleMiss && !isRankMiss;
         return isRankMiss || isRuleMiss;
       });
       return enrichWithHoldings(filtered);
@@ -370,6 +374,16 @@ export const ResultsTable = ({
                         <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 border border-teal-200 px-2 py-0.5 text-[10px] font-bold text-teal-800">
                           💼 HELD ({item.holdingWeight ? `${item.holdingWeight}%` : 'Held'})
                         </span>
+                      ) : resultsTab === 'nearMisses' ? (
+                        item.nearMissStatus === 'rank_near_miss' || (item.rank !== null && item.rank >= 21 && item.rank <= 40) ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                            ⚠️ RANK #{item.rank}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[10px] font-bold text-rose-800">
+                            ⚠️ RULE MISS
+                          </span>
+                        )
                       ) : isNew ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
                           ★ NEW
@@ -424,6 +438,10 @@ export const ResultsTable = ({
                               Not evaluated in current regional run · Allocation: {item.weightPct}%
                             </span>
                           )
+                        ) : resultsTab === 'nearMisses' ? (
+                          <span className="inline-block rounded-md px-2.5 py-1 text-[11px] font-medium leading-relaxed bg-amber-50 text-amber-800 border border-amber-200/70">
+                            {item.movementReason || (item.rank ? `Passed rules · Ranked #${item.rank} (outside Top 20 cutoff)` : 'Close to knockout threshold')}
+                          </span>
                         ) : item.movementReason ? (
                           <span
                             className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-medium leading-relaxed ${

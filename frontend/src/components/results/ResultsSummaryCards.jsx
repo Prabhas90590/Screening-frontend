@@ -50,9 +50,19 @@ export const ResultsSummaryCards = () => {
     (s) => (s.stageStatus === 'passed' && s.rank <= 20) || (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited')
   );
 
-  const nearMissSecurities = securities.filter(
-    (s) => s.nearMissStatus === 'rule_near_miss' || s.nearMissStatus === 'rank_near_miss' || s.deltaStatus === 'rule_miss'
-  );
+  const nearMissSecurities = securities.filter((s) => {
+    const isTop20 =
+      (s.stageStatus === 'passed' && s.rank !== null && s.rank <= 20) ||
+      (s.rank !== null && s.rank >= 1 && s.rank <= 20 && s.deltaStatus !== 'exited');
+    if (isTop20) return false;
+    const isRankMiss =
+      s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40);
+    const isRuleMiss =
+      s.nearMissStatus === 'rule_near_miss' ||
+      s.deltaStatus === 'rule_miss' ||
+      s.rankDelta === 'RULE_MISS';
+    return isRankMiss || isRuleMiss;
+  });
 
   const totalUniverse = currentRun?.screened || (securities.length > 0 ? securities.length : 112);
   const selectedCount = top20Securities.length > 0 ? top20Securities.length : (currentRun?.selected || 20);
