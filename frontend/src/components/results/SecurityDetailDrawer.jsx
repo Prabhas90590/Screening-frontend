@@ -19,7 +19,12 @@ import {
 } from 'lucide-react';
 import { useScreening } from '../../context/ScreeningContext';
 
-export const SecurityDetailDrawer = () => {
+export const SecurityDetailDrawer = ({
+  holdings = [],
+  persistentHoldings = [],
+  holdingTickerSet = new Set(),
+  buyCandidates = [],
+}) => {
   const {
     selectedSecurity,
     setSelectedSecurityId,
@@ -37,6 +42,44 @@ export const SecurityDetailDrawer = () => {
   const activeProfileName =
     currentRun?.rules ||
     (activeProfile ? activeProfile.name : 'Active Model');
+
+  // Match selected security against uploaded client holdings
+  const effectiveHolding = useMemo(() => {
+    if (!selectedSecurity) return null;
+    const ticker = selectedSecurity.ticker?.toUpperCase();
+    const id =
+      selectedSecurity.canonicalCompanyId ||
+      selectedSecurity.canonical_company_id ||
+      selectedSecurity.id;
+    return (
+      (holdings || []).find(
+        (h) =>
+          (h.ticker && ticker && h.ticker.toUpperCase() === ticker) ||
+          (h.canonicalCompanyId && id && h.canonicalCompanyId === id) ||
+          (h.id && id && h.id === id)
+      ) || null
+    );
+  }, [selectedSecurity, holdings]);
+
+  const isActuallyHeld = Boolean(
+    effectiveHolding ||
+      selectedSecurity?.isHolding ||
+      (selectedSecurity?.ticker && holdingTickerSet?.has(selectedSecurity.ticker.toUpperCase()))
+  );
+
+  const holdingRank = effectiveHolding?.holdingRank ?? selectedSecurity?.holdingRank ?? null;
+  const holdingWeight = effectiveHolding?.weightPct ?? selectedSecurity?.weightPct ?? null;
+  const holdingShares = effectiveHolding?.shares ?? selectedSecurity?.shares ?? null;
+  const holdingRankDelta =
+    typeof effectiveHolding?.holdingRankDelta === 'number'
+      ? effectiveHolding.holdingRankDelta
+      : typeof selectedSecurity?.holdingRankDelta === 'number'
+      ? selectedSecurity.holdingRankDelta
+      : null;
+  const portfolioName =
+    effectiveHolding?.portfolioName ?? selectedSecurity?.portfolioName ?? 'Portfolio';
+  const isBuyCandidate =
+    !isActuallyHeld && selectedSecurity?.rank !== null && selectedSecurity?.rank <= 20;
 
   useEffect(() => {
     if (selectedSecurity) {
@@ -271,12 +314,18 @@ export const SecurityDetailDrawer = () => {
             </div>
             <span
               className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                selectedSecurity.isHolding
+                isActuallyHeld
                   ? 'bg-teal-50 text-teal-800 border-teal-200'
-                  : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                  : isBuyCandidate
+                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                  : 'bg-slate-50 text-slate-600 border-slate-200'
               }`}
             >
-              {selectedSecurity.isHolding ? 'Held in Portfolio' : 'Not in Holdings'}
+              {isActuallyHeld
+                ? 'Held in Portfolio'
+                : isBuyCandidate
+                ? '★ Top 20 Buy Idea'
+                : 'Not in Holdings'}
             </span>
           </div>
 
@@ -306,29 +355,31 @@ export const SecurityDetailDrawer = () => {
 
             {/* Box 2: Uploaded Holdings */}
             <div className="rounded-lg border border-teal-200/80 bg-teal-50/40 p-3">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 block truncate" title={selectedSecurity.portfolioName || 'Client Portfolio'}>
-                Client Holdings ({selectedSecurity.portfolioName || 'Portfolio'})
+              <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 block truncate" title={portfolioName}>
+                Client Holdings ({portfolioName})
               </span>
               <div className="mt-1 flex items-baseline gap-1.5">
                 <span className="text-xl font-extrabold text-teal-900 font-mono">
-                  {selectedSecurity.holdingRank !== null && selectedSecurity.holdingRank !== undefined
-                    ? `#${selectedSecurity.holdingRank}`
-                    : selectedSecurity.isHolding
-                    ? 'Held'
+                  {isActuallyHeld
+                    ? holdingRank !== null && holdingRank !== undefined
+                      ? `#${holdingRank}`
+                      : 'Held'
                     : 'Not Held'}
                 </span>
-                {selectedSecurity.weightPct > 0 && (
+                {isActuallyHeld && holdingWeight > 0 && (
                   <span className="text-[10px] font-bold text-teal-800 bg-teal-100/70 px-1.5 py-0.2 rounded border border-teal-200">
-                    {selectedSecurity.weightPct}%
+                    {holdingWeight}%
                   </span>
                 )}
               </div>
               <p className="text-[11px] text-teal-700 mt-1">
-                {selectedSecurity.shares > 0
-                  ? `${selectedSecurity.shares.toLocaleString()} shares held`
-                  : selectedSecurity.isHolding
-                  ? 'Position recorded'
-                  : 'Candidate for inclusion'}
+                {isActuallyHeld
+                  ? holdingShares > 0
+                    ? `${Number(holdingShares).toLocaleString()} shares held`
+                    : 'Position recorded'
+                  : isBuyCandidate
+                  ? 'Candidate for initiation'
+                  : 'Not in client portfolio'}
               </p>
             </div>
           </div>
@@ -338,54 +389,61 @@ export const SecurityDetailDrawer = () => {
             <div className="flex items-center justify-between flex-wrap gap-1">
               <span className="text-[11px] font-bold text-slate-700">Rank Difference & Movement:</span>
               {(() => {
-                const delta =
-                  typeof selectedSecurity.holdingRankDelta === 'number'
-                    ? selectedSecurity.holdingRankDelta
-                    : typeof selectedSecurity.rankDelta === 'number'
-                    ? selectedSecurity.rankDelta
-                    : null;
-
-                if (delta !== null) {
-                  if (delta > 0) {
+                if (isActuallyHeld) {
+                  if (typeof holdingRankDelta === 'number') {
+                    if (holdingRankDelta > 0) {
+                      return (
+                        <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-mono">
+                          ▲ +{holdingRankDelta} vs Holding Rank
+                        </span>
+                      );
+                    }
+                    if (holdingRankDelta < 0) {
+                      return (
+                        <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200 font-mono">
+                          ▼ {holdingRankDelta} vs Holding Rank
+                        </span>
+                      );
+                    }
                     return (
-                      <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-mono">
-                        ▲ +{delta} Rank Improvement
+                      <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 font-mono">
+                        = Matched (#{holdingRank})
                       </span>
                     );
                   }
-                  if (delta < 0) {
+                  if (isExited) {
                     return (
-                      <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200 font-mono">
-                        ▼ {delta} Rank Drop
+                      <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                        ▼ Exited Active Screen
                       </span>
                     );
                   }
                   return (
-                    <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 font-mono">
-                      = Unchanged (#{selectedSecurity.rank})
+                    <span className="text-[11px] font-medium text-slate-500">
+                      Position in portfolio
                     </span>
                   );
                 }
 
-                if (selectedSecurity.isBuyCandidate) {
+                if (isBuyCandidate) {
                   return (
                     <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
-                      ★ New Buy Idea
+                      ★ Top 20 Buy Idea
                     </span>
                   );
                 }
 
-                if (isExited) {
+                if (selectedSecurity.stageStatus !== 'passed') {
                   return (
-                    <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-                      ▼ Exited Active Screen
+                    <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                      ⚠️ Knockout Filtered
                     </span>
                   );
                 }
 
                 return (
                   <span className="text-[11px] font-medium text-slate-500">
-                    Unscreened in active run
+                    Universe Rank #{selectedSecurity.rank || '—'}
                   </span>
                 );
               })()}
@@ -393,72 +451,93 @@ export const SecurityDetailDrawer = () => {
 
             <p className="text-[11px] text-slate-600 leading-relaxed">
               {(() => {
-                const delta =
-                  typeof selectedSecurity.holdingRankDelta === 'number'
-                    ? selectedSecurity.holdingRankDelta
-                    : typeof selectedSecurity.rankDelta === 'number'
-                    ? selectedSecurity.rankDelta
-                    : null;
-
-                if (delta !== null) {
-                  if (delta > 0) {
+                if (isActuallyHeld) {
+                  if (typeof holdingRankDelta === 'number') {
+                    if (holdingRankDelta > 0) {
+                      return (
+                        <>
+                          Holding <strong>#{holdingRank}</strong> ranks higher at <strong>Rank #{selectedSecurity.rank}</strong> under <em>{activeProfileName}</em> (<strong>+{holdingRankDelta} spots</strong> improvement).
+                        </>
+                      );
+                    }
+                    if (holdingRankDelta < 0) {
+                      return (
+                        <>
+                          Holding <strong>#{holdingRank}</strong> ranks lower at <strong>Rank #{selectedSecurity.rank}</strong> under <em>{activeProfileName}</em> (<strong>{Math.abs(holdingRankDelta)} spots</strong> lower).
+                        </>
+                      );
+                    }
                     return (
                       <>
-                        Holding <strong>#{selectedSecurity.holdingRank}</strong> gained <strong>+{delta} spots</strong>, moving up to <strong>Rank #{selectedSecurity.rank}</strong> under <em>{activeProfileName}</em>.
+                        Holding rank matches active model rank at <strong>#{selectedSecurity.rank}</strong>.
                       </>
                     );
                   }
-                  if (delta < 0) {
+                  if (isExited) {
                     return (
                       <>
-                        Holding <strong>#{selectedSecurity.holdingRank}</strong> slipped <strong>{Math.abs(delta)} spots</strong> to <strong>Rank #{selectedSecurity.rank}</strong> under <em>{activeProfileName}</em>.
+                        Held in client portfolio (Holding #{holdingRank || '—'}), but disqualified because it breached fundamental knockout floors in <em>{activeProfileName}</em>.
                       </>
                     );
                   }
                   return (
                     <>
-                      Holding rank matches active model rank at <strong>#{selectedSecurity.rank}</strong>.
+                      Position held in portfolio and evaluated in <em>{activeProfileName}</em>.
                     </>
                   );
                 }
 
-                if (selectedSecurity.isBuyCandidate) {
+                if (isBuyCandidate) {
                   return (
                     <>
-                      Top 20 high-conviction winner under <em>{activeProfileName}</em> (Rank #{selectedSecurity.rank}). Not currently held in client portfolio.
-                    </>
-                  );
-                }
-
-                if (isExited) {
-                  return (
-                    <>
-                      Held in client portfolio (Holding #{selectedSecurity.holdingRank || '—'}), but disqualified because it breached fundamental knockout floors in <em>{activeProfileName}</em>.
+                      Top 20 high-conviction winner under <em>{activeProfileName}</em> (Rank #{selectedSecurity.rank}). Not currently held in client portfolio — candidate for fresh capital allocation.
                     </>
                   );
                 }
 
                 return (
                   <>
-                    Position held in portfolio but outside the regional screening universe of <em>{activeProfileName}</em>.
+                    Screened security outside client holdings (Rank #{selectedSecurity.rank || '—'}).
                   </>
                 );
               })()}
             </p>
 
+            {/* Model Run-over-Run Trend if available */}
+            {typeof selectedSecurity.rankDelta === 'number' && (
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 pt-1 border-t border-slate-100">
+                <span className="font-semibold text-slate-600">Model Run Trend:</span>
+                <span className={`font-mono font-bold ${
+                  selectedSecurity.rankDelta > 0
+                    ? 'text-emerald-700'
+                    : selectedSecurity.rankDelta < 0
+                    ? 'text-rose-700'
+                    : 'text-slate-600'
+                }`}>
+                  {selectedSecurity.rankDelta > 0
+                    ? `▲ +${selectedSecurity.rankDelta} spots`
+                    : selectedSecurity.rankDelta < 0
+                    ? `▼ ${selectedSecurity.rankDelta} spots`
+                    : '= Unchanged'} vs prior screening run
+                </span>
+              </div>
+            )}
+
             {/* Quick Action Suggestion */}
             <div className="pt-2 border-t border-slate-200/70 flex items-center justify-between text-[11px]">
               <span className="font-semibold text-slate-600">Model Recommendation:</span>
               <span className="font-bold text-slate-900">
-                {selectedSecurity.comparisonStatus === 'held_in_top20'
-                  ? '✅ Recommend KEEP (Model Top 20 Winner)'
-                  : selectedSecurity.comparisonStatus === 'held_exited' || isExited
-                  ? '❌ Recommend DROP (Failed Knockout Rules)'
-                  : selectedSecurity.isBuyCandidate
+                {isActuallyHeld
+                  ? (selectedSecurity.comparisonStatus === 'held_in_top20' || (selectedSecurity.rank && selectedSecurity.rank <= 20))
+                    ? '✅ Recommend KEEP (Model Top 20 Winner)'
+                    : (isExited || selectedSecurity.comparisonStatus === 'held_exited')
+                    ? '❌ Recommend DROP (Failed Knockout Rules)'
+                    : '⚠️ Recommend REVIEW (Rank Near-Miss / Lower Conviction)'
+                  : isBuyCandidate
                   ? '⭐ Recommend BUY (New Top 20 Idea)'
-                  : selectedSecurity.comparisonStatus === 'held_rank_miss'
-                  ? '⚠️ Recommend REVIEW (Rank Near-Miss)'
-                  : 'Hold / Retain'}
+                  : selectedSecurity.rank && selectedSecurity.rank <= 40
+                  ? '⚠️ Near-Miss Contender'
+                  : 'Evaluated Universe'}
               </span>
             </div>
           </div>

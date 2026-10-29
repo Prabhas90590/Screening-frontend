@@ -45,7 +45,7 @@ export const ResultsView = () => {
       </div>
 
       {/* 5. Slide-Over Inspector Drawer with 16-Metric Breakdown & Before vs After comparison */}
-      {selectedSecurity && <SecurityDetailDrawer />}
+      {selectedSecurity && <SecurityDetailDrawer {...holdingsImport} />}
     </div>
   );
 };
