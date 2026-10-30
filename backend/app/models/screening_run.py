@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 class ScreeningRunRecord(BaseModel):
     """Database model for 'screening_runs' table."""
     run_id: str = Field(..., description="Unique execution ID, e.g. 'run-20261023-001'")
-    status: Literal["queued", "running", "succeeded", "failed"] = "succeeded"
+    status: Literal["queued", "running", "succeeded", "failed", "blocked"] = "succeeded"
     provider: str = Field(default="mock", description="Data provider used: 'mock', 'eodhd', 'lseg'")
     rule_version_id: Optional[str] = Field(None, description="Profile ID locked to this run")
     profile_name: Optional[str] = Field(None, description="Name of profile applied")

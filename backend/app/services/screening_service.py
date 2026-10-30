@@ -266,6 +266,52 @@ class ScreeningService:
                 screened_metrics = all_metrics
 
             # Evaluate entire universe against active rule profile
+            from app.services.data_blocker_service import data_blocker_service, DataBlockerException
+
+            try:
+                data_blocker_service.validate_screening_universe(
+                    metrics=screened_metrics,
+                    companies_map=companies_by_id,
+                    clean_countries=clean_countries,
+                    clean_exchanges=clean_exchanges,
+                    sim_blocker=getattr(request, "sim_blocker", None),
+                )
+            except DataBlockerException as dbe:
+                duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                run_record.status = "blocked"
+                run_record.completed_at = datetime.now(timezone.utc)
+                run_record.duration_ms = duration_ms
+                run_record.error_message = f"[{dbe.blocker_type}] {dbe.message}"
+                self.screening_repo.save_run(run_record)
+                logger.calc_warn("DATA_BLOCKER", run_id, f"Run blocked by guardrail: {dbe.blocker_type} - {dbe.message}")
+
+                return ScreeningRunResponse(
+                    run_id=run_id,
+                    status="blocked",
+                    display_currency=request.display_currency.upper(),
+                    started_at=now,
+                    completed_at=run_record.completed_at,
+                    duration_ms=duration_ms,
+                    provider_used=settings.data_provider.lower(),
+                    funnel=FunnelStageCounts(
+                        universe=len(screened_metrics),
+                        markets=len(screened_metrics),
+                        floors=0,
+                        gates=0,
+                        score=0,
+                        shortlist=0,
+                        selected=0,
+                    ),
+                    results_count=0,
+                    top_results=[],
+                    warnings=[f"Execution halted by pre-flight Data Blocker guardrail: {dbe.blocker_type}"],
+                    errors=[dbe.message],
+                    blocker_details={
+                        "blocker_type": dbe.blocker_type,
+                        "message": dbe.message,
+                        "details": dbe.details,
+                    },
+                )
             rule_profile_to_use = active_version or request.rules_config
             evaluations = RuleEngine.evaluate_batch(
                 companies_metrics=screened_metrics,
@@ -570,6 +616,8 @@ class ScreeningService:
             run_record.status = "failed"
             run_record.completed_at = datetime.now(timezone.utc)
             run_record.duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            self.screening_repo.save_run(run_record)
+            run_record.error_message = str(exc)
             self.screening_repo.save_run(run_record)
             logger.calc_warn("SCREENING", run_id, f"Screening run '{run_id}' failed: {exc}")
             raise exc

@@ -86,12 +86,13 @@ class ScreeningRunRequest(BaseModel):
     profile_name: Optional[str] = Field(None, description="Active profile name")
     rules_config: Optional[List[Dict[str, Any]]] = Field(None, description="Active rule overrides")
     sector_limits: Optional[Dict[str, float]] = Field(None, description="Sector debt limit overrides")
+    sim_blocker: Optional[str] = Field(None, description="Test simulator: 'stale', 'fx', 'rate_limit', 'coverage'")
 
 
 class ScreeningRunResponse(BaseModel):
     """Response returned upon initiating or completing a screening run."""
     run_id: str
-    status: Literal["queued", "running", "succeeded", "failed"] = "succeeded"
+    status: Literal["queued", "running", "succeeded", "failed", "blocked"] = "succeeded"
     display_currency: str = Field(default="USD", description="Currency used for all reported values")
     started_at: datetime
     completed_at: Optional[datetime] = None
@@ -102,3 +103,4 @@ class ScreeningRunResponse(BaseModel):
     top_results: List[ScreenedSecurityResult] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
+    blocker_details: Optional[Dict[str, Any]] = None
