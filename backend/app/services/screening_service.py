@@ -285,6 +285,19 @@ class ScreeningService:
                 self.screening_repo.save_run(run_record)
                 logger.calc_warn("DATA_BLOCKER", run_id, f"Run blocked by guardrail: {dbe.blocker_type} - {dbe.message}")
 
+                # Trigger Data Blocker Email Notification
+                from app.services.notification_service import notification_service
+                notification_service.notify_run_blocked(
+                    run_id=run_id,
+                    profile_name=profile_name,
+                    duration_ms=duration_ms,
+                    blocker_type=dbe.blocker_type,
+                    blocker_message=dbe.message,
+                    blocker_details=dbe.details,
+                    selected_countries=clean_countries,
+                    selected_exchanges=clean_exchanges,
+                )
+
                 return ScreeningRunResponse(
                     run_id=run_id,
                     status="blocked",
@@ -592,6 +605,18 @@ class ScreeningService:
                 f"{selected_count} selected winners ({duration_ms:.1f}ms)"
             )
 
+            # Trigger Success Email Notification with Excel attachment
+            from app.services.notification_service import notification_service
+            notification_service.notify_run_success(
+                run_id=run_id,
+                profile_name=profile_name,
+                duration_ms=duration_ms,
+                funnel_counts=funnel_record,
+                results=results_to_save,
+                selected_countries=clean_countries,
+                selected_exchanges=clean_exchanges,
+            )
+
             return ScreeningRunResponse(
                 run_id=run_id,
                 status="succeeded",
@@ -620,6 +645,16 @@ class ScreeningService:
             run_record.error_message = str(exc)
             self.screening_repo.save_run(run_record)
             logger.calc_warn("SCREENING", run_id, f"Screening run '{run_id}' failed: {exc}")
+            # Trigger Failure Email Notification
+            from app.services.notification_service import notification_service
+            notification_service.notify_run_failed(
+                run_id=run_id,
+                profile_name=profile_name,
+                duration_ms=run_record.duration_ms,
+                error_message=str(exc),
+                selected_countries=clean_countries,
+                selected_exchanges=clean_exchanges,
+            )
             raise exc
 
     def get_run(self, run_id: str) -> Optional[ScreeningRunRecord]:

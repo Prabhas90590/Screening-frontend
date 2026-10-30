@@ -438,3 +438,4 @@ class DataBlockerService:
 
 # Global singleton instance
 data_blocker_service = DataBlockerService()
+

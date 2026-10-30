@@ -50,5 +50,15 @@ class Settings:
     )
     debug: bool = _get_bool("DEBUG", True)
 
+    # Email & SMTP notification settings
+    email_notifications_enabled: bool = _get_bool("EMAIL_NOTIFICATIONS_ENABLED", True)
+    smtp_host: str = os.getenv("SMTP_HOST", "smtp.office365.com")
+    smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+    smtp_use_tls: bool = _get_bool("SMTP_USE_TLS", True)
+    smtp_user: str = os.getenv("SMTP_USER", "")
+    smtp_password: str = os.getenv("SMTP_PASSWORD", "")
+    email_from: str = os.getenv("EMAIL_FROM", "Equity Screening Platform <notifications@company.com>")
+    email_to: str = os.getenv("EMAIL_TO", "")
+
 
 settings = Settings()
