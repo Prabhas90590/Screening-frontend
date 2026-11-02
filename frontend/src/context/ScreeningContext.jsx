@@ -24,6 +24,8 @@ import {
   fetchScreeningRuns,
   recordDecisionApi,
   fetchDecisionsApi,
+  fetchScheduleConfig,
+  saveScheduleConfig,
 } from '../services/api';
 
 const ScreeningContext = createContext(null);
@@ -360,6 +362,77 @@ export const ScreeningProvider = ({ children }) => {
 
   const [funnelState, setFunnelState] = useState(INITIAL_FUNNEL);
   const [scheduleConfig, setScheduleConfig] = useState(INITIAL_SCHEDULE);
+  const [nextRuns, setNextRuns] = useState([]);
+
+  // Phase 17: Load persistent schedule config and upcoming runs from backend
+  useEffect(() => {
+    fetchScheduleConfig()
+      .then((res) => {
+        if (res && res.schedule) {
+          const s = res.schedule;
+          setScheduleConfig((prev) => ({
+            ...prev,
+            profile: s.profile_name || prev.profile,
+            selectedProfileId: s.profile_id || prev.selectedProfileId,
+            frequency: s.frequency || prev.frequency,
+            dailyType: s.daily_type || prev.dailyType || 'trading_days',
+            activeDays: s.active_days || prev.activeDays || ['mon', 'tue', 'wed', 'thu', 'fri'],
+            dayOfMonth: s.day_of_month || prev.dayOfMonth || 1,
+            time: s.time_of_day || prev.time || '08:30',
+            timezone: s.timezone || prev.timezone || 'Asia/Kolkata',
+            cronExpression: s.cron_expression || prev.cronExpression || '0 9 * * 1-5',
+            refreshDataFirst: s.refresh_data_first ?? prev.refreshDataFirst ?? true,
+            skipHolidays: s.skip_holidays ?? prev.skipHolidays ?? true,
+            notifyEmail: s.notification_email || prev.notifyEmail || '',
+            notifyTriggers: s.notify_triggers || prev.notifyTriggers,
+            isEnabled: s.is_enabled ?? true,
+          }));
+          if (res.next_runs && res.next_runs.length) {
+            setNextRuns(res.next_runs);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[ScreeningContext] Could not load schedule from backend:', err.message);
+      });
+  }, []);
+
+  const saveScheduleToBackend = async (updates = {}) => {
+    const merged = { ...scheduleConfig, ...updates };
+    const payload = {
+      schedule_id: 'default-schedule',
+      profile_id: merged.selectedProfileId || undefined,
+      profile_name: merged.profile || 'Default Strategy',
+      frequency: merged.frequency || 'Daily',
+      daily_type: merged.dailyType || 'trading_days',
+      active_days: merged.activeDays || ['mon', 'tue', 'wed', 'thu', 'fri'],
+      day_of_month: merged.dayOfMonth || 1,
+      time_of_day: merged.time || '08:30',
+      timezone: merged.timezone || 'Asia/Kolkata',
+      cron_expression: merged.cronExpression || '0 9 * * 1-5',
+      is_enabled: merged.isEnabled ?? true,
+      auto_run: merged.autoRun ?? true,
+      refresh_data_first: merged.refreshDataFirst ?? true,
+      skip_holidays: merged.skipHolidays ?? true,
+      notify_on_complete: true,
+      notification_email: (merged.notifyEmail || '').trim() || null,
+      notify_triggers: merged.notifyTriggers || { runCompletes: true, runFails: true, dataBlockers: true },
+    };
+
+    try {
+      const res = await saveScheduleConfig(payload);
+      if (res && res.schedule) {
+        setScheduleConfig((prev) => ({ ...prev, ...merged }));
+        if (res.next_runs && res.next_runs.length) {
+          setNextRuns(res.next_runs);
+        }
+        return res;
+      }
+    } catch (err) {
+      console.warn('[ScreeningContext] Could not save schedule to backend:', err.message);
+      setScheduleConfig((prev) => ({ ...prev, ...merged }));
+    }
+  };
   const [runHistory, setRunHistory] = useState([]);
   const [selectedRunId, setSelectedRunId] = useState(null);
   const [compareRunId, setCompareRunId] = useState('none');
@@ -850,7 +923,7 @@ export const ScreeningProvider = ({ children }) => {
     }
   };
 
-  const triggerRunNow = async (profileIdToRun) => {
+  const triggerRunNow = async (profileIdToRun, targetEmail) => {
     setIsScreeningRunning(true);
     setScreeningError(null);
     setScreeningRunSuccess(null);
@@ -907,6 +980,7 @@ export const ScreeningProvider = ({ children }) => {
         rule_version_id: targetProfile.id,
         profile_name: `${targetProfile.name} - Version ${targetProfile.versionNumber || '1.0'}`,
         display_currency: 'USD',
+        notification_email: (targetEmail || scheduleConfig?.notifyEmail || '').trim() || undefined,
       };
 
       console.log('[ScreeningContext] Triggering instant run with profile:', payload);
@@ -1429,6 +1503,8 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
         setSecurityDecision,
         scheduleConfig,
         updateScheduleConfig,
+        saveScheduleToBackend,
+        nextRuns,
         runHistory,
         selectedRunId,
         setSelectedRunId,

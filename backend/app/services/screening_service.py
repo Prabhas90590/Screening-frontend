@@ -151,6 +151,13 @@ class ScreeningService:
                 if saved_exchs:
                     clean_exchanges = saved_exchs
 
+        # Target recipient email for notifications
+        target_email = getattr(request, "notification_email", None)
+        if target_email:
+            target_email = target_email.strip()
+        if not target_email:
+            target_email = settings.email_to
+
         # Freeze rules snapshot
         rules_snapshot: List[dict] = []
         if active_version and active_version.rules:
@@ -296,6 +303,7 @@ class ScreeningService:
                     blocker_details=dbe.details,
                     selected_countries=clean_countries,
                     selected_exchanges=clean_exchanges,
+                    target_email=target_email,
                 )
 
                 return ScreeningRunResponse(
@@ -615,6 +623,7 @@ class ScreeningService:
                 results=results_to_save,
                 selected_countries=clean_countries,
                 selected_exchanges=clean_exchanges,
+                target_email=target_email,
             )
 
             return ScreeningRunResponse(
@@ -654,6 +663,7 @@ class ScreeningService:
                 error_message=str(exc),
                 selected_countries=clean_countries,
                 selected_exchanges=clean_exchanges,
+                target_email=target_email,
             )
             raise exc
 

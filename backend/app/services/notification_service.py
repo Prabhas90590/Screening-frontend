@@ -11,7 +11,7 @@ down the screening API response.
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -28,6 +28,7 @@ from app.services.export_service import export_service
 logger = DiagnosticLogger("notify")
 
 SENT_EMAILS_DIR = Path(__file__).resolve().parent.parent.parent / "logs" / "sent_emails"
+IST_TZ = timezone(timedelta(hours=5, minutes=30))
 
 
 class NotificationService:
@@ -53,6 +54,7 @@ class NotificationService:
         selected_countries: List[str],
         selected_exchanges: List[str],
         decisions_map: Optional[Dict[str, Dict[str, str]]] = None,
+        target_email: Optional[str] = None,
     ):
         """Send a success email with HTML executive summary and attached Excel workbook."""
         if not settings.email_notifications_enabled:
@@ -68,6 +70,7 @@ class NotificationService:
                 selected_countries=selected_countries,
                 selected_exchanges=selected_exchanges,
                 decisions_map=decisions_map,
+                target_email=target_email,
             )
         )
 
@@ -81,6 +84,7 @@ class NotificationService:
         blocker_details: Optional[Dict[str, Any]] = None,
         selected_countries: Optional[List[str]] = None,
         selected_exchanges: Optional[List[str]] = None,
+        target_email: Optional[str] = None,
     ):
         """Send a data blocker warning email explaining which pre-flight guardrail halted the run."""
         if not settings.email_notifications_enabled:
@@ -96,6 +100,7 @@ class NotificationService:
                 blocker_details=blocker_details or {},
                 selected_countries=selected_countries or [],
                 selected_exchanges=selected_exchanges or [],
+                target_email=target_email,
             )
         )
 
@@ -107,6 +112,7 @@ class NotificationService:
         error_message: str,
         selected_countries: Optional[List[str]] = None,
         selected_exchanges: Optional[List[str]] = None,
+        target_email: Optional[str] = None,
     ):
         """Send an urgent alert email for an unexpected technical pipeline crash."""
         if not settings.email_notifications_enabled:
@@ -120,6 +126,7 @@ class NotificationService:
                 error_message=error_message,
                 selected_countries=selected_countries or [],
                 selected_exchanges=selected_exchanges or [],
+                target_email=target_email,
             )
         )
 
@@ -137,6 +144,7 @@ class NotificationService:
         selected_countries: List[str],
         selected_exchanges: List[str],
         decisions_map: Optional[Dict[str, Dict[str, str]]] = None,
+        target_email: Optional[str] = None,
     ):
         """Worker: Generates Excel attachment and sends success email."""
         try:
@@ -150,7 +158,7 @@ class NotificationService:
             )
 
             # 2. Build HTML Body
-            subject = f"✅ [SUCCESS] Screening Completed: {profile_name} (Top 20 Attached)"
+            subject = f"✅ [SUCCESS] Screening Completed: {profile_name} (Top 20 & Near Misses Attached)"
             html_content = self._build_success_html(
                 run_id=run_id,
                 profile_name=profile_name,
@@ -169,6 +177,7 @@ class NotificationService:
                 html_body=html_content,
                 attachment_bytes=excel_bytes,
                 attachment_name=filename,
+                target_email=target_email,
             )
         except Exception as e:
             logger.provider_error("NOTIFY", f"Failed to dispatch success email for '{run_id}': {e}")
@@ -183,6 +192,7 @@ class NotificationService:
         blocker_details: Dict[str, Any],
         selected_countries: List[str],
         selected_exchanges: List[str],
+        target_email: Optional[str] = None,
     ):
         """Worker: Builds and sends data blocker warning email."""
         try:
@@ -202,6 +212,7 @@ class NotificationService:
                 self._send_email,
                 subject=subject,
                 html_body=html_content,
+                target_email=target_email,
             )
         except Exception as e:
             logger.provider_error("NOTIFY", f"Failed to dispatch blocker email for '{run_id}': {e}")
@@ -214,6 +225,7 @@ class NotificationService:
         error_message: str,
         selected_countries: List[str],
         selected_exchanges: List[str],
+        target_email: Optional[str] = None,
     ):
         """Worker: Builds and sends technical failure alert email."""
         try:
@@ -231,6 +243,7 @@ class NotificationService:
                 self._send_email,
                 subject=subject,
                 html_body=html_content,
+                target_email=target_email,
             )
         except Exception as e:
             logger.provider_error("NOTIFY", f"Failed to dispatch failure email for '{run_id}': {e}")
@@ -245,10 +258,11 @@ class NotificationService:
         html_body: str,
         attachment_bytes: Optional[bytes] = None,
         attachment_name: Optional[str] = None,
+        target_email: Optional[str] = None,
     ):
-        """Send email via Outlook/Office 365 SMTP, or save to disk if unconfigured."""
-        recipients_str = settings.email_to.strip()
-        recipients = [r.strip() for r in recipients_str.split(",") if r.strip()]
+        """Send email via SMTP, or save to disk if unconfigured."""
+        raw_str = (target_email.strip() if target_email else None) or settings.email_to.strip()
+        recipients = [r.strip() for r in raw_str.replace(";", ",").split(",") if r.strip()]
 
         # Construct MIME Message
         msg = MIMEMultipart("mixed")
@@ -283,9 +297,24 @@ class NotificationService:
         # Attempt Live SMTP Transmission
         try:
             logger.provider_info("NOTIFY", f"Connecting to SMTP server {settings.smtp_host}:{settings.smtp_port}...")
-            server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20)
-            if settings.smtp_use_tls:
-                server.starttls()
+            import ssl
+            context = ssl.create_default_context()
+            server = None
+            if settings.smtp_port == 465:
+                server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=20, context=context)
+                server.ehlo()
+            else:
+                try:
+                    server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20)
+                    server.ehlo()
+                    if settings.smtp_use_tls:
+                        server.starttls(context=context)
+                        server.ehlo()
+                except (smtplib.SMTPServerDisconnected, ConnectionResetError, OSError):
+                    # Automatic fallback to port 465 SSL if port 587 was dropped by firewall/ISP
+                    server = smtplib.SMTP_SSL(settings.smtp_host, 465, timeout=20, context=context)
+                    server.ehlo()
+
             server.login(settings.smtp_user, settings.smtp_password)
             server.send_message(msg)
             server.quit()
@@ -360,10 +389,53 @@ class NotificationService:
             </tr>
             """
 
+        # Near Misses Preview (Contenders ranked 21-40 or displaced / near-miss gate dropped)
+        near_misses = [
+            r for r in results
+            if getattr(r, "near_miss_status", "none") in ("rank_near_miss", "rule_near_miss")
+            or (getattr(r, "rank", 0) > 20 and getattr(r, "rank", 999) <= 40)
+        ][:5]
+        nm_rows_html = ""
+        for s in near_misses:
+            rank = getattr(s, "rank", "—")
+            ticker = getattr(s, "ticker", "")
+            name = getattr(s, "company_name", None) or getattr(s, "name", ticker)
+            score = getattr(s, "score", 0)
+            sector = getattr(s, "sector", "")
+            near_status = getattr(s, "near_miss_status", "none")
+            metric_statuses = getattr(s, "metric_statuses", {}) or {}
+            div_reason = metric_statuses.get("diversification") if isinstance(metric_statuses, dict) else None
+
+            if div_reason:
+                nm_reason = f"Displaced: {div_reason}"
+            elif near_status == "rank_near_miss" or (isinstance(rank, int) and rank > 20):
+                nm_reason = f"Rank cut-off (#{rank})"
+            elif near_status == "rule_near_miss":
+                nm_reason = "Single gate borderline miss"
+            else:
+                nm_reason = "Near miss contender"
+
+            nm_rows_html += f"""
+            <tr style="border-bottom: 1px solid #FEF3C7; font-size: 13px;">
+                <td style="padding: 10px; text-align: center; font-weight: bold; color: #B45309;">#{rank}</td>
+                <td style="padding: 10px; font-weight: bold; color: #0F172A;">{html.escape(ticker)}</td>
+                <td style="padding: 10px; color: #334155;">{html.escape(name)}</td>
+                <td style="padding: 10px; color: #64748B;">{html.escape(sector)}</td>
+                <td style="padding: 10px; text-align: center; font-weight: bold; color: #0F172A;">{score}/100</td>
+                <td style="padding: 10px; text-align: right; color: #B45309; font-weight: 500;">{html.escape(nm_reason)}</td>
+            </tr>
+            """
+
         c_str = ", ".join(c.upper() for c in selected_countries) or "Global"
         e_str = ", ".join(e.upper() for e in selected_exchanges) or "All"
-        univ = getattr(funnel_counts, "universe", len(results))
-        sel = getattr(funnel_counts, "selected", min(len(results), 20))
+        univ = getattr(funnel_counts, "universe_count", getattr(funnel_counts, "universe", len(results)))
+        floors = getattr(funnel_counts, "floors_count", getattr(funnel_counts, "floors", "—"))
+        gates = getattr(funnel_counts, "gates_count", getattr(funnel_counts, "gates", "—"))
+        sel = getattr(funnel_counts, "selected_count", getattr(funnel_counts, "selected", min(len(results), 20)))
+
+        now_ist = datetime.now(IST_TZ)
+        now_utc = datetime.now(timezone.utc)
+        completion_time_str = f"{now_ist.strftime('%I:%M:%S %p')} IST ({now_utc.strftime('%H:%M:%S')} UTC)"
 
         return f"""
         <!DOCTYPE html>
@@ -391,7 +463,7 @@ class NotificationService:
                             <td style="padding: 6px 0; color: #64748B; font-size: 13px;">Markets Covered:</td>
                             <td style="padding: 6px 0; font-size: 13px;">{html.escape(c_str)} ({html.escape(e_str)})</td>
                             <td style="padding: 6px 0; color: #64748B; font-size: 13px;">Completion Time:</td>
-                            <td style="padding: 6px 0; font-size: 13px;">{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</td>
+                            <td style="padding: 6px 0; font-weight: 600; font-size: 13px;">{completion_time_str}</td>
                         </tr>
                     </table>
 
@@ -403,11 +475,11 @@ class NotificationService:
                         </div>
                         <div style="flex: 1; text-align: center; border-left: 1px solid #CBD5E1;">
                             <div style="font-size: 11px; color: #64748B; text-transform: uppercase; font-weight: 600;">Floors Passed</div>
-                            <div style="font-size: 18px; font-weight: bold; color: #0F172A; margin-top: 2px;">{getattr(funnel_counts, 'floors', '—')}</div>
+                            <div style="font-size: 18px; font-weight: bold; color: #0F172A; margin-top: 2px;">{floors}</div>
                         </div>
                         <div style="flex: 1; text-align: center; border-left: 1px solid #CBD5E1;">
                             <div style="font-size: 11px; color: #64748B; text-transform: uppercase; font-weight: 600;">Gates Passed</div>
-                            <div style="font-size: 18px; font-weight: bold; color: #0F172A; margin-top: 2px;">{getattr(funnel_counts, 'gates', '—')}</div>
+                            <div style="font-size: 18px; font-weight: bold; color: #0F172A; margin-top: 2px;">{gates}</div>
                         </div>
                         <div style="flex: 1; text-align: center; border-left: 1px solid #CBD5E1;">
                             <div style="font-size: 11px; color: #065F46; text-transform: uppercase; font-weight: bold;">Top 20 Selected</div>
@@ -416,7 +488,7 @@ class NotificationService:
                     </div>
 
                     <!-- Top 5 Preview Table -->
-                    <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; margin: 0 0 12px 0;">Top Model Contenders Preview</h3>
+                    <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #1E3A8A; margin: 0 0 10px 0;">Top Model Contenders Preview</h3>
                     <table style="width: 100%; border-collapse: collapse; border: 1px solid #E2E8F0; border-radius: 6px; overflow: hidden; margin-bottom: 24px;">
                         <thead>
                             <tr style="background-color: #F8FAFC; border-bottom: 2px solid #E2E8F0; font-size: 11px; text-transform: uppercase; color: #64748B;">
@@ -433,12 +505,39 @@ class NotificationService:
                         </tbody>
                     </table>
 
+                    <!-- Near Misses Preview Table -->
+                    {f'''
+                    <div style="margin-bottom: 24px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                            <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #B45309; margin: 0;">⚡ Near Miss Contenders Preview</h3>
+                            <span style="font-size: 11px; color: #92400E; background-color: #FEF3C7; padding: 2px 8px; border-radius: 4px; font-weight: 600;">Included in Sheet 2</span>
+                        </div>
+                        <table style="width: 100%; border-collapse: collapse; border: 1px solid #FDE68A; border-radius: 6px; overflow: hidden;">
+                            <thead>
+                                <tr style="background-color: #FFFBEB; border-bottom: 2px solid #FDE68A; font-size: 11px; text-transform: uppercase; color: #92400E;">
+                                    <th style="padding: 8px 10px; text-align: center;">Rank</th>
+                                    <th style="padding: 8px 10px; text-align: left;">Ticker</th>
+                                    <th style="padding: 8px 10px; text-align: left;">Company</th>
+                                    <th style="padding: 8px 10px; text-align: left;">Sector</th>
+                                    <th style="padding: 8px 10px; text-align: center;">Score</th>
+                                    <th style="padding: 8px 10px; text-align: right;">Status / Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {nm_rows_html}
+                            </tbody>
+                        </table>
+                    </div>
+                    ''' if nm_rows_html else ''}
+
                     <!-- Attachment Notice -->
                     <div style="background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; padding: 14px 16px;">
-                        <div style="font-weight: 600; font-size: 13px; color: #1E40AF; margin-bottom: 4px;">📎 Complete Excel Workbook Attached</div>
-                        <div style="font-size: 12px; color: #3B82F6; line-height: 1.4;">
-                            The full Excel workbook (<strong>Screening_Results_{html.escape(run_id)}.xlsx</strong>) is attached to this email. It contains 3 tabs:
-                            <strong>Top 20 Winners</strong>, <strong>Near Misses</strong>, and <strong>Master Universe</strong>, with side-by-side Decision and Reason audit columns.
+                        <div style="font-weight: 600; font-size: 13px; color: #1E40AF; margin-bottom: 4px;">📎 Multi-Sheet Excel Workbook Attached</div>
+                        <div style="font-size: 12px; color: #1E3A8A; line-height: 1.5;">
+                            The full Excel workbook (<strong>Screening_Results_{html.escape(run_id)}.xlsx</strong>) is attached with 3 comprehensive sheets:
+                            <br>• <strong>Sheet 1: Top 20 Winners</strong> — Portfolio picks with audit decisions & rankings.
+                            <br>• <strong>Sheet 2: Near Misses</strong> — Contenders falling just outside Top 20 or single-gate misses with reason notes.
+                            <br>• <strong>Sheet 3: Master Universe</strong> — All evaluated companies across markets.
                         </div>
                     </div>
                 </div>
@@ -576,3 +675,4 @@ class NotificationService:
 
 # Global singleton instance
 notification_service = NotificationService()
+

@@ -346,3 +346,39 @@ export async function syncDecisionsApi({ profile_name, run_id, decisions }) {
     return null;
   }
 }
+
+
+/**
+ * Phase 17: Fetch screening schedule configuration and upcoming next runs from backend.
+ */
+export async function fetchScheduleConfig() {
+  try {
+    const res = await fetch(`${API_BASE}/schedules`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch schedule`);
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Could not fetch schedule:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Phase 17: Save screening schedule configuration to backend.
+ */
+export async function saveScheduleConfig(config) {
+  try {
+    const res = await fetch(`${API_BASE}/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `HTTP ${res.status}: Failed to save schedule`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.error('[API] Failed to save schedule:', err.message);
+    throw err;
+  }
+}

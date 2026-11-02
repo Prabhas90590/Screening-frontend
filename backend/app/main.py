@@ -11,10 +11,12 @@ from app.api.routes.holdings import router as holdings_router
 from app.api.routes.rules import router as rules_router
 from app.api.routes.screening import router as screening_router
 from app.api.routes.decisions import router as decisions_router
+from app.api.routes.schedules import router as schedules_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
 from app.db.connection import db_manager
+from app.services.scheduler_service import scheduler_service
 
 configure_logging(settings.debug)
 logger = logging.getLogger(__name__)
@@ -25,8 +27,12 @@ async def lifespan(app: FastAPI):
     """Lifecycle event: initialize database tables automatically on server startup."""
     logger.info("Server starting up: verifying database tables...")
     db_manager.init_tables()
+    logger.info("Starting automated screening background scheduler...")
+    scheduler_service.start()
     yield
-    logger.info("Server shutting down: closing database connection pool...")
+    logger.info("Server shutting down: stopping background scheduler...")
+    scheduler_service.stop()
+    logger.info("Closing database connection pool...")
     db_manager.close_all()
 
 
@@ -70,6 +76,7 @@ app.include_router(screening_router)
 app.include_router(rules_router)
 app.include_router(holdings_router)
 app.include_router(decisions_router)
+app.include_router(schedules_router)
 
 
 @app.get("/", tags=["root"])

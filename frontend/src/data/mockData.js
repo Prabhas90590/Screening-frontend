@@ -1016,7 +1016,7 @@ export const INITIAL_SCHEDULE = {
   time: '06:00',
   timezone: 'America/New_York',
   refreshDataFirst: true,
-  notifyEmail: 'pm@yourfirm.com',
+  notifyEmail: '',
   notifyTriggers: {
     runCompletes: true,
     runFails: true,

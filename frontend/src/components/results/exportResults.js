@@ -161,51 +161,7 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
     const wb = XLSX.utils.book_new();
 
     // ─────────────────────────────────────────────────────────────
-    // SHEET 1: Master "All Results (Categorized)"
-    // Section 1: All 20 Top 20 stocks (1..20)
-    // Section 2: Near Misses (21..40 & gate misses) immediately after
-    // Section 3: Remaining Universe (41+)
-    // ─────────────────────────────────────────────────────────────
-    const masterData = [
-      [`PORTFOLIO SCREENING RESULTS: ${profileName || 'ACTIVE STRATEGY'}`],
-      [`Date: ${dateStr}`, `Total Screened: ${securities.length}`, `Top 20 Portfolio: ${top20Securities.length}`, `Near Misses: ${allNearMisses.length}`],
-      [],
-      ['=== 🏆 SECTION 1: TOP 20 PORTFOLIO SELECTION ==='],
-      headers,
-      ...top20Securities.map((s) =>
-        formatSecurityRow(
-          s,
-          s.stageStatus === 'passed' ? 'Top 20 (Qualified)' : 'Top 20 (Near Miss Selection)'
-        )
-      ),
-      [],
-      ['=== ⚠️ SECTION 2: NEAR MISSES (CLOSEST CONTENDERS) ==='],
-      headers,
-      ...allNearMisses.map((s) =>
-        formatSecurityRow(
-          s,
-          (s.nearMissStatus === 'rank_near_miss' || (s.rank !== null && s.rank >= 21 && s.rank <= 40))
-            ? 'Near Miss (Rank #21-40)'
-            : 'Near Miss (Rule Gate)'
-        )
-      ),
-    ];
-
-    if (remainingUniverse.length > 0) {
-      masterData.push(
-        [],
-        ['=== 📋 SECTION 3: OTHER EVALUATED UNIVERSE ==='],
-        headers,
-        ...remainingUniverse.map((s) => formatSecurityRow(s, 'Evaluated Universe'))
-      );
-    }
-
-    const wsMaster = XLSX.utils.aoa_to_sheet(masterData);
-    wsMaster['!cols'] = colWidths;
-    XLSX.utils.book_append_sheet(wb, wsMaster, 'All Categorized');
-
-    // ─────────────────────────────────────────────────────────────
-    // SHEET 2: Dedicated "Top 20 Portfolio"
+    // SHEET 1: Dedicated "Top 20" (Strictly capped at Ranks 1..20)
     // ─────────────────────────────────────────────────────────────
     const top20Data = [
       [`TOP 20 PORTFOLIO SELECTION - ${profileName || 'Active Strategy'}`],
@@ -221,10 +177,10 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
     ];
     const wsTop20 = XLSX.utils.aoa_to_sheet(top20Data);
     wsTop20['!cols'] = colWidths;
-    XLSX.utils.book_append_sheet(wb, wsTop20, 'Top 20 Portfolio');
+    XLSX.utils.book_append_sheet(wb, wsTop20, 'Top 20');
 
     // ─────────────────────────────────────────────────────────────
-    // SHEET 3: Dedicated "Near Misses"
+    // SHEET 2: Dedicated "Near Misses" (Displaced & Borderline Contenders)
     // ─────────────────────────────────────────────────────────────
     const nearMissData = [
       [`NEAR MISS CONTENDERS - ${profileName || 'Active Strategy'}`],
@@ -245,25 +201,19 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
     XLSX.utils.book_append_sheet(wb, wsNearMiss, 'Near Misses');
 
     // ─────────────────────────────────────────────────────────────
-    // SHEET 4: Executive "Summary"
+    // SHEET 3: Dedicated "Master Universe" (All Screened Securities)
     // ─────────────────────────────────────────────────────────────
-    const qualifiedTop20Count = top20Securities.filter((s) => s.stageStatus === 'passed').length;
-    const filledTop20Count = top20Securities.length - qualifiedTop20Count;
-
-    const summaryData = [
-      ['Metric', 'Value'],
-      ['Strategy Profile', profileName || 'Default Strategy'],
-      ['Run Date', dateStr],
-      ['Total Securities Evaluated', securities.length],
-      ['Top 20 Portfolio Total', top20Securities.length],
-      ['  - Fully Qualified Winners', qualifiedTop20Count],
-      ['  - Near Miss Contender Selections', filledTop20Count],
-      ['Near Misses (Ranks 21-40 & Gate Misses)', allNearMisses.length],
-      ['Remaining Evaluated Universe', remainingUniverse.length],
+    const allSecuritiesSorted = [...securities].sort((a, b) => (a.rank || 999) - (b.rank || 999));
+    const masterData = [
+      [`COMPLETE SCREENED UNIVERSE - ${profileName || 'Active Strategy'}`],
+      [`Export Date: ${dateStr}`, `Total Evaluated: ${allSecuritiesSorted.length}`],
+      [],
+      headers,
+      ...allSecuritiesSorted.map((s) => formatSecurityRow(s)),
     ];
-    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-    wsSummary['!cols'] = [{ wch: 35 }, { wch: 30 }];
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+    const wsMaster = XLSX.utils.aoa_to_sheet(masterData);
+    wsMaster['!cols'] = colWidths;
+    XLSX.utils.book_append_sheet(wb, wsMaster, 'Master Universe');
 
     // Trigger Excel download
     XLSX.writeFile(wb, downloadFileName);

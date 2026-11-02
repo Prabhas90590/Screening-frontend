@@ -87,6 +87,7 @@ class ScreeningRunRequest(BaseModel):
     rules_config: Optional[List[Dict[str, Any]]] = Field(None, description="Active rule overrides")
     sector_limits: Optional[Dict[str, float]] = Field(None, description="Sector debt limit overrides")
     sim_blocker: Optional[str] = Field(None, description="Test simulator: 'stale', 'fx', 'rate_limit', 'coverage'")
+    notification_email: Optional[str] = Field(None, description="Dynamic user-specified recipient email for run results and Excel report")
 
 
 class ScreeningRunResponse(BaseModel):
