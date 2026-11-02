@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useScreening } from '../../context/ScreeningContext';
 import { Toggle } from '../common/Toggle';
 
@@ -6,40 +6,95 @@ import { Toggle } from '../common/Toggle';
 function parse24to12(time24 = '08:30') {
   const parts = (time24 || '08:30').split(':');
   let h = parseInt(parts[0], 10);
-  if (isNaN(h)) h = 8;
-  const m = parts[1] ? parts[1].padStart(2, '0').slice(0, 2) : '00';
+  if (isNaN(h) || h < 0 || h > 23) h = 8;
+  let m = parts[1] ? parseInt(parts[1], 10) : 0;
+  if (isNaN(m) || m < 0 || m > 59) m = 30;
   const period = h >= 12 ? 'PM' : 'AM';
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return {
-    time12: `${String(h12).padStart(2, '0')}:${m}`,
+    time12: `${String(h12).padStart(2, '0')}:${String(m).padStart(2, '0')}`,
     period,
   };
 }
 
-// Helper to convert 12h time string and period back to 24h "HH:MM"
+// Helper to convert 12h time string and period back to 24h "HH:MM" with strict clamping
 function format12to24(time12 = '08:30', period = 'AM') {
   const parts = (time12 || '08:30').split(':');
   let h = parseInt(parts[0], 10);
   if (isNaN(h)) h = 8;
-  const m = parts[1] ? parts[1].padStart(2, '0').slice(0, 2) : '00';
+  if (h < 1) h = 1;
+  if (h > 12) h = 12;
+  let m = parts[1] ? parseInt(parts[1], 10) : 0;
+  if (isNaN(m) || m < 0) m = 0;
+  if (m > 59) m = 59;
   if (period === 'AM') {
     if (h === 12) h = 0;
   } else {
     if (h < 12) h += 12;
   }
-  return `${String(h).padStart(2, '0')}:${m}`;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 const TimePickerWithAmPm = ({ value24, onChange, timezone }) => {
-  const { time12, period } = parse24to12(value24);
+  const parsed = parse24to12(value24);
+  const [localText, setLocalText] = useState(parsed.time12);
+  const [currentPeriod, setCurrentPeriod] = useState(parsed.period);
 
-  const handleTimeChange = (newTime12) => {
-    const new24 = format12to24(newTime12, period);
+  // Sync from props only when value24 changes externally (e.g. preset buttons clicked)
+  useEffect(() => {
+    const p = parse24to12(value24);
+    setLocalText(p.time12);
+    setCurrentPeriod(p.period);
+  }, [value24]);
+
+  const commitTime = (text, period) => {
+    const cleaned = (text || '').trim();
+    if (!cleaned) return;
+    const parts = cleaned.split(':');
+    let h = parseInt(parts[0], 10);
+    if (isNaN(h)) h = 8;
+    if (h < 1) h = 1;
+    if (h > 12) h = 12;
+
+    let m = 0;
+    if (parts.length > 1) {
+      m = parseInt(parts[1], 10);
+      if (isNaN(m) || m < 0) m = 0;
+      if (m > 59) m = 59;
+    }
+
+    const formatted12 = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    setLocalText(formatted12);
+    const new24 = format12to24(formatted12, period);
     onChange(new24);
   };
 
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    // Allow digits and colon up to 5 characters
+    if (/^[0-9:]*$/.test(val) && val.length <= 5) {
+      setLocalText(val);
+      // Auto-commit if user types full "HH:MM" e.g. "10:45"
+      if (/^\d{1,2}:\d{2}$/.test(val)) {
+        commitTime(val, currentPeriod);
+      }
+    }
+  };
+
+  const handleBlur = () => {
+    commitTime(localText, currentPeriod);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      commitTime(localText, currentPeriod);
+      e.target.blur();
+    }
+  };
+
   const handlePeriodChange = (newPeriod) => {
-    const new24 = format12to24(time12, newPeriod);
+    setCurrentPeriod(newPeriod);
+    const new24 = format12to24(localText, newPeriod);
     onChange(new24);
   };
 
@@ -48,17 +103,20 @@ const TimePickerWithAmPm = ({ value24, onChange, timezone }) => {
       <div className="flex items-center border border-slate-300 rounded overflow-hidden shadow-2xs bg-white focus-within:border-[#146b63]">
         <input
           type="text"
-          value={time12}
-          onChange={(e) => handleTimeChange(e.target.value)}
+          value={localText}
+          onChange={handleInputChange}
+          onBlur={handleBlur}
+          onKeyDown={handleKeyDown}
           placeholder="08:30"
           className="w-16 px-2.5 py-1 text-slate-800 font-mono text-xs focus:outline-hidden"
+          title="Type time in 12-hour format (e.g. 10:45) and toggle AM/PM"
         />
         <div className="flex border-l border-slate-200 bg-slate-50 text-[11px] font-semibold">
           <button
             type="button"
             onClick={() => handlePeriodChange('AM')}
             className={`px-2 py-1 transition-colors cursor-pointer ${
-              period === 'AM'
+              currentPeriod === 'AM'
                 ? 'bg-[#146b63] text-white font-bold'
                 : 'text-slate-600 hover:bg-slate-200/60'
             }`}
@@ -69,7 +127,7 @@ const TimePickerWithAmPm = ({ value24, onChange, timezone }) => {
             type="button"
             onClick={() => handlePeriodChange('PM')}
             className={`px-2 py-1 transition-colors cursor-pointer ${
-              period === 'PM'
+              currentPeriod === 'PM'
                 ? 'bg-[#146b63] text-white font-bold'
                 : 'text-slate-600 hover:bg-slate-200/60'
             }`}
@@ -382,21 +440,33 @@ export const ScheduleConfigCard = () => {
               </div>
             </div>
 
-            {/* Skip Holidays Checkbox */}
-            <div className="grid grid-cols-4 items-center gap-4">
-              <span />
-              <div className="col-span-3">
-                <label className="flex items-center space-x-2 text-xs text-slate-600 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={scheduleConfig.skipHolidays ?? true}
-                    onChange={(e) => updateScheduleConfig({ skipHolidays: e.target.checked })}
-                    className="accent-[#146b63]"
-                  />
-                  <span>Skip official national exchange holidays (e.g. Diwali, Independence Day, Christmas)</span>
-                </label>
+            {/* Skip Holidays Checkbox - ONLY shown for Trading Days */}
+            {dailyType === 'trading_days' ? (
+              <div className="grid grid-cols-4 items-center gap-4">
+                <span />
+                <div className="col-span-3">
+                  <label className="flex items-center space-x-2 text-xs text-slate-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={scheduleConfig.skipHolidays ?? true}
+                      onChange={(e) => updateScheduleConfig({ skipHolidays: e.target.checked })}
+                      className="accent-[#146b63]"
+                    />
+                    <span>Skip official national exchange holidays (e.g. Diwali, Independence Day, Christmas)</span>
+                  </label>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-4 items-center gap-4">
+                <span />
+                <div className="col-span-3">
+                  <p className="text-[11px] text-slate-500 italic flex items-center space-x-1">
+                    <span>ℹ️</span>
+                    <span>Calendar Day cadence runs 7 days a week, 365 days a year (including weekends and holidays).</span>
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

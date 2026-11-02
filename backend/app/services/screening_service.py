@@ -189,6 +189,7 @@ class ScreeningService:
             duration_ms=0.0,
             started_at=now,
             completed_at=None,
+            trigger_type=getattr(request, "trigger_type", "instant") or "instant",
         )
         self.screening_repo.save_run(run_record)
 
@@ -629,6 +630,7 @@ class ScreeningService:
             return ScreeningRunResponse(
                 run_id=run_id,
                 status="succeeded",
+                trigger_type=run_record.trigger_type,
                 display_currency=request.display_currency.upper(),
                 started_at=now,
                 completed_at=run_record.completed_at,

@@ -19,6 +19,7 @@ import {
   activateProfile as activateProfileApi,
   deleteProfile as deleteProfileApi,
   fetchScreeningResults,
+  fetchRunFunnel,
   fetchRunComparison,
   initiateScreening,
   fetchScreeningRuns,
@@ -452,10 +453,11 @@ export const ScreeningProvider = ({ children }) => {
       }
 
       try {
-        const [realResults, runDecisions, profileDecisions] = await Promise.all([
+        const [realResults, runDecisions, profileDecisions, runFunnel] = await Promise.all([
           fetchScreeningResults(selectedRunId),
           fetchDecisionsApi(selectedRunId).catch(() => []),
           fetchDecisionsApi(null, currentRun?.rules).catch(() => []),
+          fetchRunFunnel(selectedRunId).catch(() => null),
         ]);
         const decisionMap = new Map();
         (profileDecisions || []).forEach((d) => {
@@ -464,6 +466,25 @@ export const ScreeningProvider = ({ children }) => {
         (runDecisions || []).forEach((d) => {
           if (d.canonical_company_id) decisionMap.set(d.canonical_company_id, d);
         });
+
+        if (runFunnel && isMounted) {
+          setFunnelState((prev) => ({
+            ...prev,
+            counts: {
+              universe: runFunnel.universe,
+              markets: runFunnel.markets,
+              floors: runFunnel.floors,
+              gates: runFunnel.gates,
+              score: runFunnel.score,
+              shortlist: runFunnel.shortlist,
+              selected: runFunnel.selected,
+            },
+            runInfo: {
+              ...prev.runInfo,
+              asOfDate: `Run ${selectedRunId} active`,
+            },
+          }));
+        }
 
         if (isMounted && Array.isArray(realResults) && realResults.length > 0) {
           const mapped = realResults.map((r) => {
@@ -896,6 +917,7 @@ export const ScreeningProvider = ({ children }) => {
           return {
             id: r.run_id,
             run: r.run_id,
+            trigger_type: r.trigger_type || 'instant',
             started: startedStr,
             rawStarted: r.started_at,
             rules: displayRulesName,
@@ -939,6 +961,7 @@ export const ScreeningProvider = ({ children }) => {
     const inProgressItem = {
       id: tempRunId,
       run: tempRunId,
+      trigger_type: 'instant',
       started: 'Just now',
       rules: `${targetProfile.name} - Version ${targetProfile.versionNumber || '1.0'}`,
       screened: 'Evaluating...',

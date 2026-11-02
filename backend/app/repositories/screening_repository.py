@@ -34,26 +34,28 @@ class ScreeningRepository:
             INSERT INTO screening_runs (
                 run_id, status, provider, rule_version_id, profile_name,
                 display_currency, selected_countries, selected_exchanges,
-                rules_snapshot, duration_ms, started_at, completed_at, error_message
+                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (run_id) DO UPDATE SET
                 status = EXCLUDED.status,
                 completed_at = EXCLUDED.completed_at,
                 duration_ms = EXCLUDED.duration_ms,
-                error_message = EXCLUDED.error_message;
+                error_message = EXCLUDED.error_message,
+                trigger_type = EXCLUDED.trigger_type;
         """ if is_postgres else """
             INSERT INTO screening_runs (
                 run_id, status, provider, rule_version_id, profile_name,
                 display_currency, selected_countries, selected_exchanges,
-                rules_snapshot, duration_ms, started_at, completed_at, error_message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id) DO UPDATE SET
                 status = excluded.status,
                 completed_at = excluded.completed_at,
                 duration_ms = excluded.duration_ms,
-                error_message = excluded.error_message;
+                error_message = excluded.error_message,
+                trigger_type = excluded.trigger_type;
         """
 
         countries_json = json.dumps(run.selected_countries)
@@ -79,6 +81,7 @@ class ScreeningRepository:
             started_at_val,
             completed_at_val,
             run.error_message,
+            run.trigger_type or "instant",
         )
 
 
@@ -95,12 +98,34 @@ class ScreeningRepository:
             conn.close()
 
     def get_run(self, run_id: str) -> Optional[ScreeningRunRecord]:
-        """Fetch screening run by ID."""
+        """Fetch screening run by ID with joined funnel counts."""
         conn = db_manager.get_connection()
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-        query = "SELECT * FROM screening_runs WHERE run_id = %s" if is_postgres else "SELECT * FROM screening_runs WHERE run_id = ?"
-
-        # De-duplicate by id to avoid PostgreSQL CardinalityViolation
+        query = """
+            SELECT 
+                r.run_id, r.status, r.provider, r.rule_version_id, r.profile_name,
+                r.display_currency, r.selected_countries, r.selected_exchanges,
+                r.rules_snapshot, r.duration_ms, r.started_at, r.completed_at,
+                r.error_message,
+                COALESCE(f.universe_count, 0) as universe_count,
+                COALESCE(f.selected_count, 0) as selected_count,
+                COALESCE(r.trigger_type, 'instant') as trigger_type
+            FROM screening_runs r
+            LEFT JOIN funnel_counts f ON r.run_id = f.run_id
+            WHERE r.run_id = %s
+        """ if is_postgres else """
+            SELECT 
+                r.run_id, r.status, r.provider, r.rule_version_id, r.profile_name,
+                r.display_currency, r.selected_countries, r.selected_exchanges,
+                r.rules_snapshot, r.duration_ms, r.started_at, r.completed_at,
+                r.error_message,
+                COALESCE(f.universe_count, 0) as universe_count,
+                COALESCE(f.selected_count, 0) as selected_count,
+                COALESCE(r.trigger_type, 'instant') as trigger_type
+            FROM screening_runs r
+            LEFT JOIN funnel_counts f ON r.run_id = f.run_id
+            WHERE r.run_id = ?
+        """
 
         try:
             cursor = conn.cursor()
@@ -108,7 +133,9 @@ class ScreeningRepository:
             row = cursor.fetchone()
             if not row:
                 return None
-            return self._row_to_run(row, is_postgres)
+            col_names = [desc[0] for desc in cursor.description]
+            row_dict = dict(zip(col_names, row))
+            return self._row_to_run(row_dict, is_postgres=False)
         finally:
             conn.close()
 
@@ -123,7 +150,8 @@ class ScreeningRepository:
                 r.rules_snapshot, r.duration_ms, r.started_at, r.completed_at,
                 r.error_message,
                 COALESCE(f.universe_count, 0) as universe_count,
-                COALESCE(f.selected_count, 0) as selected_count
+                COALESCE(f.selected_count, 0) as selected_count,
+                COALESCE(r.trigger_type, 'instant') as trigger_type
             FROM screening_runs r
             LEFT JOIN funnel_counts f ON r.run_id = f.run_id
             ORDER BY r.started_at DESC
@@ -135,7 +163,8 @@ class ScreeningRepository:
                 r.rules_snapshot, r.duration_ms, r.started_at, r.completed_at,
                 r.error_message,
                 COALESCE(f.universe_count, 0) as universe_count,
-                COALESCE(f.selected_count, 0) as selected_count
+                COALESCE(f.selected_count, 0) as selected_count,
+                COALESCE(r.trigger_type, 'instant') as trigger_type
             FROM screening_runs r
             LEFT JOIN funnel_counts f ON r.run_id = f.run_id
             ORDER BY r.started_at DESC
@@ -147,8 +176,9 @@ class ScreeningRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(query, (limit,))
-            rows = cursor.fetchall()
-            return [self._row_to_run(row, is_postgres) for row in rows]
+            col_names = [desc[0] for desc in cursor.description]
+            rows = [dict(zip(col_names, r)) for r in cursor.fetchall()]
+            return [self._row_to_run(row, is_postgres=False) for row in rows]
         finally:
             conn.close()
 
@@ -458,8 +488,53 @@ class ScreeningRepository:
     # ROW PARSERS
     # -------------------------------------------------------------
 
-    def _row_to_run(self, row: Any, is_postgres: bool) -> ScreeningRunRecord:
-        if is_postgres:
+    def _row_to_run(self, row: Any, is_postgres: bool = False) -> ScreeningRunRecord:
+        if isinstance(row, dict):
+            countries = row.get("selected_countries")
+            if isinstance(countries, str):
+                countries = json.loads(countries or "[]")
+            elif not isinstance(countries, list):
+                countries = []
+
+            exchanges = row.get("selected_exchanges")
+            if isinstance(exchanges, str):
+                exchanges = json.loads(exchanges or "[]")
+            elif not isinstance(exchanges, list):
+                exchanges = []
+
+            rules_snap = row.get("rules_snapshot")
+            if isinstance(rules_snap, str):
+                rules_snap = json.loads(rules_snap or "[]")
+            elif not isinstance(rules_snap, list):
+                rules_snap = []
+
+            started = row.get("started_at")
+            if not isinstance(started, datetime):
+                started = datetime.fromisoformat(str(started)) if started else datetime.utcnow()
+
+            completed = row.get("completed_at")
+            if completed and not isinstance(completed, datetime):
+                completed = datetime.fromisoformat(str(completed))
+
+            return ScreeningRunRecord(
+                run_id=row.get("run_id", ""),
+                status=row.get("status", "succeeded"),
+                provider=row.get("provider", "mock"),
+                rule_version_id=row.get("rule_version_id"),
+                profile_name=row.get("profile_name"),
+                display_currency=row.get("display_currency") or "USD",
+                selected_countries=countries,
+                selected_exchanges=exchanges,
+                rules_snapshot=rules_snap,
+                duration_ms=float(row.get("duration_ms") or 0.0),
+                started_at=started,
+                completed_at=completed,
+                error_message=row.get("error_message"),
+                universe_count=int(row.get("universe_count") or 0),
+                selected_count=int(row.get("selected_count") or 0),
+                trigger_type=row.get("trigger_type") or "instant",
+            )
+        else:
             return ScreeningRunRecord(
                 run_id=row[0],
                 status=row[1],
@@ -474,26 +549,9 @@ class ScreeningRepository:
                 started_at=row[10] if isinstance(row[10], datetime) else datetime.fromisoformat(str(row[10])),
                 completed_at=row[11] if (row[11] is None or isinstance(row[11], datetime)) else datetime.fromisoformat(str(row[11])),
                 error_message=row[12],
-                universe_count=int(row[13]) if len(row) > 13 and row[13] is not None else 0,
-                selected_count=int(row[14]) if len(row) > 14 and row[14] is not None else 0,
-            )
-        else:
-            return ScreeningRunRecord(
-                run_id=row["run_id"],
-                status=row["status"],
-                provider=row["provider"],
-                rule_version_id=row["rule_version_id"],
-                profile_name=row["profile_name"],
-                display_currency=row["display_currency"] or "USD",
-                selected_countries=json.loads(row["selected_countries"] or "[]"),
-                selected_exchanges=json.loads(row["selected_exchanges"] or "[]"),
-                rules_snapshot=json.loads(row["rules_snapshot"] or "[]"),
-                duration_ms=float(row["duration_ms"] or 0.0),
-                started_at=datetime.fromisoformat(str(row["started_at"])),
-                completed_at=datetime.fromisoformat(str(row["completed_at"])) if row["completed_at"] else None,
-                error_message=row["error_message"],
-                universe_count=int(row["universe_count"]) if "universe_count" in row.keys() and row["universe_count"] is not None else 0,
-                selected_count=int(row["selected_count"]) if "selected_count" in row.keys() and row["selected_count"] is not None else 0,
+                universe_count=int(row[13]) if len(row) > 13 and row[13] is not None and str(row[13]).isdigit() else 0,
+                selected_count=int(row[14]) if len(row) > 14 and row[14] is not None and str(row[14]).isdigit() else 0,
+                trigger_type=row[15] if len(row) > 15 and row[15] is not None else "instant",
             )
 
     def _row_to_result(self, row: Any, is_postgres: bool) -> ScreeningResultRecord:

@@ -76,8 +76,8 @@ class FunnelStageCounts(BaseModel):
 
 class ScreeningRunRequest(BaseModel):
     """Payload to trigger a screening run for selected markets and rules."""
-    countries: List[str] = Field(..., description="List of country IDs, e.g. ['us', 'ca', 'in']")
-    exchanges: List[str] = Field(..., description="List of exchange IDs, e.g. ['nasdaq', 'nyse', 'nse']")
+    countries: List[str] = Field(default_factory=lambda: ["us", "in"], description="List of country IDs, e.g. ['us', 'ca', 'in']")
+    exchanges: List[str] = Field(default_factory=lambda: ["nasdaq", "nse"], description="List of exchange IDs, e.g. ['nasdaq', 'nyse', 'nse']")
     display_currency: str = Field(
         default="USD",
         description="Client-selected reporting currency for all values and market caps (default: '$' / 'USD')"
@@ -88,12 +88,14 @@ class ScreeningRunRequest(BaseModel):
     sector_limits: Optional[Dict[str, float]] = Field(None, description="Sector debt limit overrides")
     sim_blocker: Optional[str] = Field(None, description="Test simulator: 'stale', 'fx', 'rate_limit', 'coverage'")
     notification_email: Optional[str] = Field(None, description="Dynamic user-specified recipient email for run results and Excel report")
+    trigger_type: Optional[str] = Field(default="instant", description="'instant' (manual run now) or 'scheduled'")
 
 
 class ScreeningRunResponse(BaseModel):
     """Response returned upon initiating or completing a screening run."""
     run_id: str
     status: Literal["queued", "running", "succeeded", "failed", "blocked"] = "succeeded"
+    trigger_type: str = Field(default="instant", description="'instant' or 'scheduled'")
     display_currency: str = Field(default="USD", description="Currency used for all reported values")
     started_at: datetime
     completed_at: Optional[datetime] = None

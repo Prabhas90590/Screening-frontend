@@ -10,6 +10,7 @@ export const ResultsFilterBar = ({
   holdingsSubTab = 'all',
   setHoldingsSubTab,
   uploadHoldingsFile,
+  clearPortfolioHoldings,
   holdingsUploadError,
   holdingsUploadSummary,
   exportResults,
@@ -195,6 +196,16 @@ export const ResultsFilterBar = ({
                 }}
               />
             </label>
+            {holdings && holdings.length > 0 && (
+              <button
+                type="button"
+                onClick={clearPortfolioHoldings}
+                className="cursor-pointer rounded-md border border-rose-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 transition-colors"
+                title="Clear all portfolio holdings and start clean"
+              >
+                Clear Portfolio
+              </button>
+            )}
             <span className="text-[11px] text-slate-500">
               Supported files: CSV, XLS, XLSX (Upload replaces previous holdings)
             </span>

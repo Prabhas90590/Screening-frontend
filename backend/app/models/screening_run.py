@@ -20,6 +20,7 @@ class ScreeningRunRecord(BaseModel):
     started_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    trigger_type: str = Field(default="instant", description="'instant' (manual run now) or 'scheduled'")
     universe_count: Optional[int] = 0
     selected_count: Optional[int] = 0
 

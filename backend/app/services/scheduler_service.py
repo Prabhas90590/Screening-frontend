@@ -320,6 +320,7 @@ class SchedulerService:
             rule_version_id=config.profile_id if config.profile_id else None,
             profile_name=config.profile_name,
             notification_email=config.notification_email,
+            trigger_type="scheduled",
         )
 
         try:
@@ -358,8 +359,8 @@ class SchedulerService:
             except Exception as e:
                 logger.warning(f"[SCHEDULER:WORKER:ERROR] Exception in scheduler loop: {e}")
 
-            # Sleep 30 seconds
-            await asyncio.sleep(30)
+            # Sleep 10 seconds for timely execution of scheduled minute
+            await asyncio.sleep(10)
 
     def start(self):
         """Start the background scheduler worker."""

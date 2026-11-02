@@ -26,6 +26,20 @@ from app.security_master.identity import normalize_ticker
 
 logger = logging.getLogger("app.services.holdings")
 
+TICKER_HEADER_CANDIDATES = {
+    "ticker",
+    "symbol",
+    "securitysymbol",
+    "stocksymbol",
+    "stock",
+    "securityid",
+    "code",
+    "isin",
+    "identifier",
+    "asset",
+    "security",
+}
+
 
 class HoldingsService:
     """Service orchestrating portfolio import, identifier matching, and storage."""
@@ -43,7 +57,7 @@ class HoldingsService:
             return self._parse_csv_bytes(file_bytes)
 
     def _parse_csv_bytes(self, file_bytes: bytes) -> List[Dict[str, Any]]:
-        """Parse CSV bytes trying UTF-8 first, then Latin-1."""
+        """Parse CSV bytes trying UTF-8 first, then Latin-1, detecting header row dynamically across title banners."""
         text = None
         for enc in ["utf-8-sig", "utf-8", "latin-1"]:
             try:
@@ -55,38 +69,108 @@ class HoldingsService:
         if not text:
             raise ValueError("Unable to decode CSV file with supported encodings (UTF-8, Latin-1).")
 
-        reader = csv.DictReader(io.StringIO(text))
-        rows: List[Dict[str, Any]] = []
-        for r in reader:
-            cleaned = {str(k).strip(): str(v).strip() for k, v in r.items() if k is not None}
-            if any(cleaned.values()):
-                rows.append(cleaned)
-        return rows
-
-    def _parse_excel_bytes(self, file_bytes: bytes) -> List[Dict[str, Any]]:
-        """Parse Excel spreadsheet bytes using openpyxl."""
-        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
-        sheet = wb.active
-        if not sheet:
+        raw_lines = list(csv.reader(io.StringIO(text)))
+        if not raw_lines:
             return []
 
-        rows_iter = sheet.iter_rows(values_only=True)
-        try:
-            header_row = next(rows_iter)
-        except StopIteration:
+        header_idx = -1
+        for idx in range(min(50, len(raw_lines))):
+            row = raw_lines[idx]
+            if not row or not any(str(c).strip() for c in row):
+                continue
+            norm_cells = [re.sub(r"[^a-zA-Z0-9]", "", str(c)).lower() for c in row if c is not None and str(c).strip()]
+            if any(c in TICKER_HEADER_CANDIDATES for c in norm_cells):
+                header_idx = idx
+                break
+
+        if header_idx == -1:
+            for idx, row in enumerate(raw_lines):
+                if row and any(str(c).strip() for c in row):
+                    header_idx = idx
+                    break
+
+        if header_idx == -1:
             return []
 
-        headers = [str(h).strip() if h is not None else f"col_{i}" for i, h in enumerate(header_row)]
+        header_row = raw_lines[header_idx]
+        headers = [str(h).strip() if (h and str(h).strip()) else f"col_{i}" for i, h in enumerate(header_row)]
 
         result: List[Dict[str, Any]] = []
-        for row_values in rows_iter:
-            if not row_values or not any(row_values):
+        for row_values in raw_lines[header_idx + 1:]:
+            if not row_values or not any(str(c).strip() for c in row_values):
                 continue
             row_dict = {}
             for i, val in enumerate(row_values):
                 if i < len(headers):
                     row_dict[headers[i]] = str(val).strip() if val is not None else ""
-            if any(row_dict.values()):
+            if any(v for k, v in row_dict.items() if v and not k.startswith("col_")):
+                result.append(row_dict)
+        return result
+
+    def _parse_excel_bytes(self, file_bytes: bytes) -> List[Dict[str, Any]]:
+        """Parse Excel spreadsheet bytes using openpyxl, dynamically detecting header row across title banners."""
+        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+        if not wb.sheetnames:
+            return []
+
+        # Find best sheet: prefer sheets named 'top 20', 'top20', 'holding', 'portfolio', 'position', 'results'
+        best_sheet = None
+        best_headers: List[str] = []
+        best_rows: List[List[Any]] = []
+
+        priority_sheets = []
+        other_sheets = []
+        for name in wb.sheetnames:
+            nl = name.lower()
+            if any(k in nl for k in ["top 20", "top20", "holding", "portfolio", "position", "universe", "results"]):
+                priority_sheets.append(wb[name])
+            elif wb.active and name == wb.active.title:
+                priority_sheets.insert(0, wb[name])
+            else:
+                other_sheets.append(wb[name])
+
+        sheets_to_check = priority_sheets + other_sheets
+
+        for sheet in sheets_to_check:
+            sheet_rows = list(sheet.iter_rows(values_only=True))
+            if not sheet_rows:
+                continue
+
+            for idx in range(min(50, len(sheet_rows))):
+                row = sheet_rows[idx]
+                if not row or not any(row):
+                    continue
+                norm_cells = [re.sub(r"[^a-zA-Z0-9]", "", str(c)).lower() for c in row if c is not None and str(c).strip()]
+                if any(c in TICKER_HEADER_CANDIDATES for c in norm_cells):
+                    best_sheet = sheet
+                    best_headers = [str(h).strip() if (h is not None and str(h).strip()) else f"col_{i}" for i, h in enumerate(row)]
+                    best_rows = sheet_rows[idx + 1:]
+                    break
+            if best_sheet:
+                break
+
+        # Fallback if no header row matched ticker candidates: use active sheet's first non-empty row
+        if not best_sheet and wb.active:
+            active_sheet = wb.active
+            sheet_rows = list(active_sheet.iter_rows(values_only=True))
+            for idx, row in enumerate(sheet_rows):
+                if row and any(row):
+                    best_headers = [str(h).strip() if (h is not None and str(h).strip()) else f"col_{i}" for i, h in enumerate(row)]
+                    best_rows = sheet_rows[idx + 1:]
+                    break
+
+        if not best_headers:
+            return []
+
+        result: List[Dict[str, Any]] = []
+        for row_values in best_rows:
+            if not row_values or not any(row_values):
+                continue
+            row_dict = {}
+            for i, val in enumerate(row_values):
+                if i < len(best_headers):
+                    row_dict[best_headers[i]] = str(val).strip() if val is not None else ""
+            if any(v for k, v in row_dict.items() if v and not k.startswith("col_")):
                 result.append(row_dict)
         return result
 
@@ -126,14 +210,36 @@ class HoldingsService:
             )
 
         headers = list(raw_rows[0].keys())
-        ticker_col = self._detect_column(headers, ["ticker", "symbol", "security", "securityid", "code", "isin"])
-        name_col = self._detect_column(headers, ["name", "company", "companyname", "securityname", "description"])
-        sector_col = self._detect_column(headers, ["spsector", "sector", "industry", "gicssector"])
-        mcap_col = self._detect_column(headers, ["marketcap", "mktcap", "cap"])
-        shares_col = self._detect_column(headers, ["shares", "quantity", "qty", "units", "position"])
-        cost_col = self._detect_column(headers, ["pricepershare", "costbasis", "cost", "price", "avgcost", "purchaseprice"])
-        weight_col = self._detect_column(headers, ["allocation", "weight", "weightpct", "weightpercentage", "pct"])
-        rank_col = self._detect_column(headers, ["rank", "holdingrank", "modelrank", "position", "#", "rankinholdings"])
+        ticker_col = self._detect_column(headers, [
+            "ticker", "symbol", "securitysymbol", "stocksymbol", "stock", "securityid", "code", "isin", "identifier", "asset", "security"
+        ])
+        name_col = self._detect_column(headers, [
+            "securityname", "companyname", "name", "company", "description", "securitydesc", "issuer"
+        ])
+        sector_col = self._detect_column(headers, [
+            "spsector", "sector", "industry", "gicssector", "industrygroup"
+        ])
+        mcap_col = self._detect_column(headers, [
+            "marketcap", "mktcap", "cap", "marketcapitalization"
+        ])
+        shares_col = self._detect_column(headers, [
+            "shares", "quantity", "qty", "units", "position", "currentshares"
+        ])
+        cost_col = self._detect_column(headers, [
+            "pricepershare", "costbasis", "cost", "price", "avgcost", "purchaseprice", "currentprice", "lastprice"
+        ])
+        weight_col = self._detect_column(headers, [
+            "allocation", "weight", "weightpct", "weightpercentage", "pct", "pctofportfolio", "portfolioweight"
+        ])
+        rank_col = self._detect_column(headers, [
+            "rank", "holdingrank", "modelrank", "position", "#", "rankinholdings"
+        ])
+        country_col = self._detect_column(headers, [
+            "country", "countrycode", "nation", "domicile", "geo"
+        ])
+        exchange_col = self._detect_column(headers, [
+            "exchange", "mic", "market", "primaryexchange"
+        ])
 
         if not ticker_col:
             return HoldingsImportResponse(
@@ -159,8 +265,8 @@ class HoldingsService:
         port_slug = re.sub(r"[^a-zA-Z0-9]", "-", portfolio_name.lower()).strip("-")
 
         for idx, row in enumerate(raw_rows):
-            raw_id = row.get(ticker_col, "").strip()
-            if not raw_id or raw_id == ",":
+            raw_id = str(row.get(ticker_col, "")).strip().strip("'\"")
+            if not raw_id or raw_id == "," or raw_id.lower() in ("nan", "none", "null"):
                 continue
 
             # Resolve against Security Master or auto-register new company from row metadata
@@ -171,6 +277,8 @@ class HoldingsService:
                     name=row.get(name_col) if name_col else None,
                     sector=row.get(sector_col) if sector_col else None,
                     market_cap_str=row.get(mcap_col) if mcap_col else None,
+                    country=row.get(country_col) if country_col else None,
+                    exchange=row.get(exchange_col) if exchange_col else None,
                 )
 
             if not company:
@@ -301,6 +409,8 @@ class HoldingsService:
         name: Optional[str] = None,
         sector: Optional[str] = None,
         market_cap_str: Optional[str] = None,
+        country: Optional[str] = None,
+        exchange: Optional[str] = None,
     ):
         """Auto-register unknown security from client holding file into Security Master."""
         from app.models.company import CompanyRecord
@@ -310,34 +420,41 @@ class HoldingsService:
         # Clean ticker e.g. "NLCP", "5108 TO" -> "5108", "CA FR" -> "CA", "ZAL-XE" -> "ZAL"
         clean_ticker = re.sub(r"[^A-Za-z0-9]", "", raw_upper.split()[0].split(".")[0].split("-")[0]) or raw_upper
 
-        country = "US"
-        exchange = "NASDAQ"
-        if " TO" in raw_upper or ".T" in raw_upper:
-            country = "JP"
-            exchange = "TSE"
-        elif " FR" in raw_upper or ".PA" in raw_upper:
-            country = "FR"
-            exchange = "Euronext Paris"
-        elif " XE" in raw_upper or ".DE" in raw_upper or "-XE" in raw_upper:
-            country = "DE"
-            exchange = "Xetra"
-        elif " OS" in raw_upper or ".OL" in raw_upper or "-OS" in raw_upper:
-            country = "NO"
-            exchange = "Oslo Børs"
-        elif " EB" in raw_upper or "-EB" in raw_upper:
-            country = "CH"
-            exchange = "SIX"
-        elif "-SG" in raw_upper or ".SI" in raw_upper:
-            country = "SG"
-            exchange = "SGX"
-        elif " BR" in raw_upper:
-            country = "BR"
-            exchange = "B3"
-        elif ".NS" in raw_upper or ".BO" in raw_upper or " IN" in raw_upper:
-            country = "IN"
-            exchange = "NSE"
+        reg_country = country.strip().upper() if (country and country.strip()) else ""
+        reg_exchange = exchange.strip().upper() if (exchange and exchange.strip()) else ""
 
-        canonical_id = f"comp-{country.lower()}-{clean_ticker.lower()}"
+        if not reg_country or not reg_exchange:
+            detected_country = "US"
+            detected_exchange = "NASDAQ"
+            if " TO" in raw_upper or ".T" in raw_upper:
+                detected_country = "JP"
+                detected_exchange = "TSE"
+            elif " FR" in raw_upper or ".PA" in raw_upper:
+                detected_country = "FR"
+                detected_exchange = "Euronext Paris"
+            elif " XE" in raw_upper or ".DE" in raw_upper or "-XE" in raw_upper:
+                detected_country = "DE"
+                detected_exchange = "Xetra"
+            elif " OS" in raw_upper or ".OL" in raw_upper or "-OS" in raw_upper:
+                detected_country = "NO"
+                detected_exchange = "Oslo Børs"
+            elif " EB" in raw_upper or "-EB" in raw_upper:
+                detected_country = "CH"
+                detected_exchange = "SIX"
+            elif "-SG" in raw_upper or ".SI" in raw_upper:
+                detected_country = "SG"
+                detected_exchange = "SGX"
+            elif " BR" in raw_upper:
+                detected_country = "BR"
+                detected_exchange = "B3"
+            elif ".NS" in raw_upper or ".BO" in raw_upper or " IN" in raw_upper:
+                detected_country = "IN"
+                detected_exchange = "NSE"
+            
+            reg_country = reg_country or detected_country
+            reg_exchange = reg_exchange or detected_exchange
+
+        canonical_id = f"comp-{reg_country.lower()}-{clean_ticker.lower()}"
         comp_name = name.strip() if (name and name.strip()) else f"{clean_ticker} Corporation"
         clean_sector = sector.strip() if (sector and sector.strip()) else "General"
         mcap = self._parse_market_cap(market_cap_str)
@@ -347,8 +464,8 @@ class HoldingsService:
             canonical_id=canonical_id,
             name=comp_name,
             primary_ticker=clean_ticker,
-            country=country,
-            primary_exchange=exchange,
+            country=reg_country,
+            primary_exchange=reg_exchange,
             sector=clean_sector,
             industry=clean_sector,
             market_cap=mcap,
@@ -360,13 +477,13 @@ class HoldingsService:
         )
         company_repository.save_company(record)
 
-        listing_id = f"lst-{canonical_id}-{exchange.lower()}"
+        listing_id = f"lst-{canonical_id}-{reg_exchange.lower()}"
         listing_rec = ListingRecord(
             listing_id=listing_id,
             canonical_company_id=canonical_id,
-            exchange_id=exchange.lower(),
+            exchange_id=reg_exchange.lower(),
             ticker=clean_ticker,
-            country_id=country.lower(),
+            country_id=reg_country.lower(),
             is_primary=True,
             currency="USD",
         )
@@ -463,4 +580,3 @@ class HoldingsService:
 
 
 holdings_service = HoldingsService()
-

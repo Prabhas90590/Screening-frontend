@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ScheduleConfigSchema(BaseModel):
@@ -33,6 +33,22 @@ class ScheduleConfigSchema(BaseModel):
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @field_validator("time_of_day")
+    @classmethod
+    def validate_time_of_day(cls, v: str) -> str:
+        """Validate and clamp time_of_day to valid 24h range (00:00 to 23:59)."""
+        if not v or ":" not in v:
+            return "08:30"
+        try:
+            parts = v.strip().split(":")
+            h, m = int(parts[0]), int(parts[1])
+            # Clamp hours (0-23) and minutes (0-59)
+            h_clamped = max(0, min(h, 23))
+            m_clamped = max(0, min(m, 59))
+            return f"{h_clamped:02d}:{m_clamped:02d}"
+        except Exception:
+            return "08:30"
 
 
 class ScheduleResponse(BaseModel):
