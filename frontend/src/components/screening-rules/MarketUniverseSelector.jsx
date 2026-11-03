@@ -7,6 +7,8 @@ export const MarketUniverseSelector = () => {
     toggleCountry,
     exchanges,
     toggleExchange,
+    selectAllMarkets,
+    clearAllMarkets,
   } = useScreening();
 
   const selectedCountries = useMemo(
@@ -26,9 +28,27 @@ export const MarketUniverseSelector = () => {
             Countries &amp; exchanges
           </h2>
         </div>
-        <span className="text-[11px] text-slate-500">
-          {selectedCountries.length} countries · {selectedExchangeCount} exchanges selected
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={selectAllMarkets}
+            className="px-2.5 py-1 text-xs font-semibold bg-[#238c83] hover:bg-[#147b73] text-white rounded shadow-2xs transition-colors cursor-pointer flex items-center space-x-1"
+            title="Select all 15 countries and 17 exchanges to screen the full 236 stocks"
+          >
+            <span>✓</span>
+            <span>Select All Markets (All 236 Stocks)</span>
+          </button>
+          <button
+            type="button"
+            onClick={clearAllMarkets}
+            className="px-2.5 py-1 text-xs font-medium bg-white hover:bg-slate-50 border border-slate-300 text-slate-600 rounded transition-colors cursor-pointer"
+          >
+            Clear All
+          </button>
+          <span className="text-[11px] text-slate-500 pl-1 font-medium">
+            {selectedCountries.length} countries · {selectedExchangeCount} exchanges selected
+          </span>
+        </div>
       </div>
       <p className="mt-1 text-[11px] text-slate-500">
         Select where the scheduled run should fetch stock data from before configuring screening rules.

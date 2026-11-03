@@ -969,7 +969,7 @@ export const ScheduleConfigCard = () => {
             <div className="relative max-w-md">
               <input
                 type="text"
-                placeholder="e.g. prabhas.muthyala@zeniusit.com, manoj@zeniusit.com"
+                placeholder="e.g. your.email@company.com"
                 value={scheduleConfig.notifyEmail || ''}
                 onChange={(e) => {
                   setEmailTouched(true);

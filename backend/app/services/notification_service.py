@@ -260,9 +260,16 @@ class NotificationService:
         attachment_name: Optional[str] = None,
         target_email: Optional[str] = None,
     ):
-        """Send email via SMTP, or save to disk if unconfigured."""
-        raw_str = (target_email.strip() if target_email else None) or settings.email_to.strip()
+        """Send email via SMTP, strictly only to input recipients."""
+        # Strictly accept ONLY what is explicitly given as input (no fallbacks or hidden emails)
+        raw_str = (target_email or "").strip()
         recipients = [r.strip() for r in raw_str.replace(";", ",").split(",") if r.strip()]
+
+        if not recipients:
+            # If no recipient was provided in input, do NOT send live emails to anyone!
+            self._save_to_disk(subject, html_body, attachment_bytes, attachment_name)
+            logger.provider_info("NOTIFY", f"Archived email to disk (no recipient input provided; live dispatch skipped).")
+            return
 
         # Construct MIME Message
         msg = MIMEMultipart("mixed")

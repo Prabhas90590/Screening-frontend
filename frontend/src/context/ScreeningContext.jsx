@@ -1349,6 +1349,32 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
     );
   };
 
+  const selectAllMarkets = () => {
+    const targetCountryIds = new Set(['in', 'us', 'jp', 'uk', 'de', 'ch', 'fr', 'hk', 'ca', 'kr', 'tw', 'nl', 'au', 'no', 'sg']);
+    const targetExchangeIds = new Set([
+      'nse', 'bse', 'nyse', 'nasdaq', 'tse', 'lse', 'xetra', 'six', 'euronext-paris',
+      'hkex', 'tsx', 'krx', 'twse', 'euronext-amsterdam', 'asx', 'ose', 'sgx'
+    ]);
+
+    setCountries((prev) =>
+      prev.map((c) => ({
+        ...c,
+        selected: targetCountryIds.has(c.id.toLowerCase()),
+      }))
+    );
+    setExchanges((prev) =>
+      prev.map((e) => ({
+        ...e,
+        selected: targetExchangeIds.has(e.id.toLowerCase()),
+      }))
+    );
+  };
+
+  const clearAllMarkets = () => {
+    setCountries((prev) => prev.map((c) => ({ ...c, selected: false })));
+    setExchanges((prev) => prev.map((e) => ({ ...e, selected: false })));
+  };
+
   const updateDiversification = (updates) => {
     setDiversification((prev) => ({ ...prev, ...updates }));
   };
@@ -1725,6 +1751,8 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
         toggleCountry,
         exchanges,
         toggleExchange,
+        selectAllMarkets,
+        clearAllMarkets,
         toggleSector,
         setAllSectors,
         diversification,

@@ -151,12 +151,12 @@ class ScreeningService:
                 if saved_exchs:
                     clean_exchanges = saved_exchs
 
-        # Target recipient email for notifications
+        # Target recipient email for notifications - strictly only what is given as input
         target_email = getattr(request, "notification_email", None)
-        if target_email:
+        if target_email and target_email.strip():
             target_email = target_email.strip()
-        if not target_email:
-            target_email = settings.email_to
+        else:
+            target_email = None
 
         # Freeze rules snapshot
         rules_snapshot: List[dict] = []
