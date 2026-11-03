@@ -1,10 +1,11 @@
+from pathlib import Path
 """Unit and integration test for Phase 17 Scheduler."""
 
 from datetime import datetime, timezone, timedelta
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__))))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.db.connection import db_manager
 from app.schemas.schedule import ScheduleConfigSchema
@@ -73,7 +74,7 @@ def test_scheduler_lifecycle():
         daily_type="trading_days",
         time_of_day="08:30",
         timezone="Asia/Kolkata",
-        notification_email="prabhas.muthyala@zeniusit.com, manoj@zenius.com",
+        notification_email="prabhas.muthyala@zeniusit.com, manoj@zeniusit.com",
     )
     saved = scheduler_service.save_schedule(save_cfg)
     assert saved.next_run_at is not None

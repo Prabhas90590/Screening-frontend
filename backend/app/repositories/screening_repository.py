@@ -34,28 +34,30 @@ class ScreeningRepository:
             INSERT INTO screening_runs (
                 run_id, status, provider, rule_version_id, profile_name,
                 display_currency, selected_countries, selected_exchanges,
-                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type
+                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type, notification_email
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (run_id) DO UPDATE SET
                 status = EXCLUDED.status,
                 completed_at = EXCLUDED.completed_at,
                 duration_ms = EXCLUDED.duration_ms,
                 error_message = EXCLUDED.error_message,
-                trigger_type = EXCLUDED.trigger_type;
+                trigger_type = EXCLUDED.trigger_type,
+                notification_email = EXCLUDED.notification_email;
         """ if is_postgres else """
             INSERT INTO screening_runs (
                 run_id, status, provider, rule_version_id, profile_name,
                 display_currency, selected_countries, selected_exchanges,
-                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type, notification_email
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id) DO UPDATE SET
                 status = excluded.status,
                 completed_at = excluded.completed_at,
                 duration_ms = excluded.duration_ms,
                 error_message = excluded.error_message,
-                trigger_type = excluded.trigger_type;
+                trigger_type = excluded.trigger_type,
+                notification_email = excluded.notification_email;
         """
 
         countries_json = json.dumps(run.selected_countries)
@@ -82,6 +84,7 @@ class ScreeningRepository:
             completed_at_val,
             run.error_message,
             run.trigger_type or "instant",
+            run.notification_email,
         )
 
 
@@ -109,7 +112,8 @@ class ScreeningRepository:
                 r.error_message,
                 COALESCE(f.universe_count, 0) as universe_count,
                 COALESCE(f.selected_count, 0) as selected_count,
-                COALESCE(r.trigger_type, 'instant') as trigger_type
+                COALESCE(r.trigger_type, 'instant') as trigger_type,
+                r.notification_email
             FROM screening_runs r
             LEFT JOIN funnel_counts f ON r.run_id = f.run_id
             WHERE r.run_id = %s
@@ -121,7 +125,8 @@ class ScreeningRepository:
                 r.error_message,
                 COALESCE(f.universe_count, 0) as universe_count,
                 COALESCE(f.selected_count, 0) as selected_count,
-                COALESCE(r.trigger_type, 'instant') as trigger_type
+                COALESCE(r.trigger_type, 'instant') as trigger_type,
+                r.notification_email
             FROM screening_runs r
             LEFT JOIN funnel_counts f ON r.run_id = f.run_id
             WHERE r.run_id = ?
@@ -151,7 +156,8 @@ class ScreeningRepository:
                 r.error_message,
                 COALESCE(f.universe_count, 0) as universe_count,
                 COALESCE(f.selected_count, 0) as selected_count,
-                COALESCE(r.trigger_type, 'instant') as trigger_type
+                COALESCE(r.trigger_type, 'instant') as trigger_type,
+                r.notification_email
             FROM screening_runs r
             LEFT JOIN funnel_counts f ON r.run_id = f.run_id
             ORDER BY r.started_at DESC
@@ -164,7 +170,8 @@ class ScreeningRepository:
                 r.error_message,
                 COALESCE(f.universe_count, 0) as universe_count,
                 COALESCE(f.selected_count, 0) as selected_count,
-                COALESCE(r.trigger_type, 'instant') as trigger_type
+                COALESCE(r.trigger_type, 'instant') as trigger_type,
+                r.notification_email
             FROM screening_runs r
             LEFT JOIN funnel_counts f ON r.run_id = f.run_id
             ORDER BY r.started_at DESC
@@ -179,6 +186,50 @@ class ScreeningRepository:
             col_names = [desc[0] for desc in cursor.description]
             rows = [dict(zip(col_names, r)) for r in cursor.fetchall()]
             return [self._row_to_run(row, is_postgres=False) for row in rows]
+        finally:
+            conn.close()
+
+    def delete_run(self, run_id: str) -> bool:
+        """Permanently delete a single screening run and its associated records."""
+        conn = db_manager.get_connection()
+        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
+        p = "%s" if is_postgres else "?"
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"DELETE FROM screening_results WHERE run_id = {p}", (run_id,))
+            cursor.execute(f"DELETE FROM funnel_counts WHERE run_id = {p}", (run_id,))
+            cursor.execute(f"DELETE FROM raw_responses WHERE run_id = {p}", (run_id,))
+            cursor.execute(f"DELETE FROM decisions WHERE run_id = {p}", (run_id,))
+            cursor.execute(f"DELETE FROM screening_runs WHERE run_id = {p}", (run_id,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            logger.info(f"[REPOSITORY:DELETE_RUN] Successfully deleted run '{run_id}' (affected: {deleted})")
+            return deleted
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"[REPOSITORY:DELETE_RUN:ERROR] Could not delete run '{run_id}': {e}")
+            raise
+        finally:
+            conn.close()
+
+    def clear_all_runs(self) -> int:
+        """Permanently delete all screening runs and their results."""
+        conn = db_manager.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM screening_results")
+            cursor.execute("DELETE FROM funnel_counts")
+            cursor.execute("DELETE FROM raw_responses")
+            cursor.execute("DELETE FROM decisions")
+            cursor.execute("DELETE FROM screening_runs")
+            count = cursor.rowcount
+            conn.commit()
+            logger.info(f"[REPOSITORY:CLEAR_RUNS] Successfully cleared all screening runs")
+            return count
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"[REPOSITORY:CLEAR_RUNS:ERROR] Could not clear screening runs: {e}")
+            raise
         finally:
             conn.close()
 
@@ -533,6 +584,7 @@ class ScreeningRepository:
                 universe_count=int(row.get("universe_count") or 0),
                 selected_count=int(row.get("selected_count") or 0),
                 trigger_type=row.get("trigger_type") or "instant",
+                notification_email=row.get("notification_email"),
             )
         else:
             return ScreeningRunRecord(
@@ -552,6 +604,7 @@ class ScreeningRepository:
                 universe_count=int(row[13]) if len(row) > 13 and row[13] is not None and str(row[13]).isdigit() else 0,
                 selected_count=int(row[14]) if len(row) > 14 and row[14] is not None and str(row[14]).isdigit() else 0,
                 trigger_type=row[15] if len(row) > 15 and row[15] is not None else "instant",
+                notification_email=row[16] if len(row) > 16 else None,
             )
 
     def _row_to_result(self, row: Any, is_postgres: bool) -> ScreeningResultRecord:

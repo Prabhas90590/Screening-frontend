@@ -190,6 +190,7 @@ class ScreeningService:
             started_at=now,
             completed_at=None,
             trigger_type=getattr(request, "trigger_type", "instant") or "instant",
+            notification_email=target_email,
         )
         self.screening_repo.save_run(run_record)
 

@@ -23,6 +23,7 @@ class ScreeningRunRecord(BaseModel):
     trigger_type: str = Field(default="instant", description="'instant' (manual run now) or 'scheduled'")
     universe_count: Optional[int] = 0
     selected_count: Optional[int] = 0
+    notification_email: Optional[str] = Field(default=None, description='Notification email recipient')
 
 
 class FunnelCountRecord(BaseModel):

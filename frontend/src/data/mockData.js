@@ -1011,10 +1011,11 @@ export const INITIAL_FUNNEL = {
 
 export const INITIAL_SCHEDULE = {
   profile: 'None',
-  frequency: 'Weekly',
-  activeDays: ['mon'],
-  time: '06:00',
-  timezone: 'America/New_York',
+  frequency: 'Daily',
+  dailyType: 'trading_days',
+  activeDays: ['mon', 'tue', 'wed', 'thu', 'fri'],
+  time: '08:30',
+  timezone: 'Asia/Kolkata',
   refreshDataFirst: true,
   notifyEmail: '',
   notifyTriggers: {

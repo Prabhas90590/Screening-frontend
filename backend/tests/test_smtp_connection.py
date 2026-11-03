@@ -7,6 +7,16 @@ Reads settings from backend/.env and tests:
   4. Sends a lightweight test confirmation email to EMAIL_TO.
 """
 
+import os
+import sys
+from pathlib import Path
+
+# Ensure backend root is on sys.path
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText

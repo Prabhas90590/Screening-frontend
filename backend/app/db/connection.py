@@ -275,13 +275,206 @@ CREATE TABLE IF NOT EXISTS holdings (
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
+    schedule_id TEXT PRIMARY KEY,
+    frequency TEXT NOT NULL DEFAULT 'Weekly',
+    day_of_week TEXT DEFAULT 'Monday',
+    time_of_day TEXT DEFAULT '09:00',
+    is_enabled INTEGER DEFAULT 0,
+    auto_run INTEGER DEFAULT 1,
+    notify_on_complete INTEGER DEFAULT 1,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS schedules_daily (
+    schedule_id TEXT PRIMARY KEY,
+    frequency TEXT NOT NULL DEFAULT 'Daily',
+    day_of_week TEXT DEFAULT 'Monday',
+    time_of_day TEXT DEFAULT '08:30',
+    is_enabled INTEGER DEFAULT 1,
+    auto_run INTEGER DEFAULT 1,
+    notify_on_complete INTEGER DEFAULT 1,
+    profile_id TEXT,
+    profile_name TEXT,
+    notification_email TEXT,
+    timezone TEXT DEFAULT 'Asia/Kolkata',
+    daily_type TEXT DEFAULT 'trading_days',
+    active_days TEXT DEFAULT 'mon,tue,wed,thu,fri',
+    day_of_month INTEGER DEFAULT 1,
+    cron_expression TEXT DEFAULT '0 9 * * 1-5',
+    skip_holidays INTEGER DEFAULT 1,
+    refresh_data_first INTEGER DEFAULT 1,
+    notify_triggers TEXT DEFAULT '{"runFails": true, "dataBlockers": true, "runCompletes": true}',
+    last_run_at TEXT,
+    next_run_at TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS schedules_weekly (
+    schedule_id TEXT PRIMARY KEY,
+    frequency TEXT NOT NULL DEFAULT 'Weekly',
+    day_of_week TEXT DEFAULT 'Monday',
+    time_of_day TEXT DEFAULT '09:00',
+    is_enabled INTEGER DEFAULT 1,
+    auto_run INTEGER DEFAULT 1,
+    notify_on_complete INTEGER DEFAULT 1,
+    profile_id TEXT,
+    profile_name TEXT,
+    notification_email TEXT,
+    timezone TEXT DEFAULT 'Asia/Kolkata',
+    daily_type TEXT DEFAULT 'trading_days',
+    active_days TEXT DEFAULT 'mon',
+    day_of_month INTEGER DEFAULT 1,
+    cron_expression TEXT DEFAULT '0 9 * * 1-5',
+    skip_holidays INTEGER DEFAULT 1,
+    refresh_data_first INTEGER DEFAULT 1,
+    notify_triggers TEXT DEFAULT '{"runFails": true, "dataBlockers": true, "runCompletes": true}',
+    last_run_at TEXT,
+    next_run_at TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS schedules_monthly (
+    schedule_id TEXT PRIMARY KEY,
+    frequency TEXT NOT NULL DEFAULT 'Monthly',
+    day_of_week TEXT DEFAULT 'Monday',
+    time_of_day TEXT DEFAULT '09:00',
+    is_enabled INTEGER DEFAULT 1,
+    auto_run INTEGER DEFAULT 1,
+    notify_on_complete INTEGER DEFAULT 1,
+    profile_id TEXT,
+    profile_name TEXT,
+    notification_email TEXT,
+    timezone TEXT DEFAULT 'Asia/Kolkata',
+    daily_type TEXT DEFAULT 'trading_days',
+    active_days TEXT DEFAULT 'mon',
+    day_of_month INTEGER DEFAULT 1,
+    cron_expression TEXT DEFAULT '0 9 * * 1-5',
+    skip_holidays INTEGER DEFAULT 1,
+    refresh_data_first INTEGER DEFAULT 1,
+    notify_triggers TEXT DEFAULT '{"runFails": true, "dataBlockers": true, "runCompletes": true}',
+    last_run_at TEXT,
+    next_run_at TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS schedules_custom (
+    schedule_id TEXT PRIMARY KEY,
+    frequency TEXT NOT NULL DEFAULT 'Custom',
+    day_of_week TEXT DEFAULT 'Monday',
+    time_of_day TEXT DEFAULT '09:00',
+    is_enabled INTEGER DEFAULT 1,
+    auto_run INTEGER DEFAULT 1,
+    notify_on_complete INTEGER DEFAULT 1,
+    profile_id TEXT,
+    profile_name TEXT,
+    notification_email TEXT,
+    timezone TEXT DEFAULT 'Asia/Kolkata',
+    daily_type TEXT DEFAULT 'trading_days',
+    active_days TEXT DEFAULT 'mon,tue,wed,thu,fri',
+    day_of_month INTEGER DEFAULT 1,
+    cron_expression TEXT DEFAULT '0 9 * * 1-5',
+    skip_holidays INTEGER DEFAULT 1,
+    refresh_data_first INTEGER DEFAULT 1,
+    notify_triggers TEXT DEFAULT '{"runFails": true, "dataBlockers": true, "runCompletes": true}',
+    last_run_at TEXT,
+    next_run_at TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Dedicated Cadence Tables (Phase 18)
+CREATE TABLE IF NOT EXISTS schedules_daily (
+    schedule_id VARCHAR(64) PRIMARY KEY,
+    frequency VARCHAR(32) NOT NULL DEFAULT 'Daily',
+    day_of_week VARCHAR(16) DEFAULT 'Monday',
+    time_of_day VARCHAR(16) DEFAULT '08:30',
+    is_enabled BOOLEAN DEFAULT TRUE,
+    auto_run BOOLEAN DEFAULT TRUE,
+    notify_on_complete BOOLEAN DEFAULT TRUE,
+    profile_id VARCHAR(64),
+    profile_name VARCHAR(128),
+    notification_email TEXT,
+    timezone VARCHAR(64) DEFAULT 'Asia/Kolkata',
+    daily_type VARCHAR(32) DEFAULT 'trading_days',
+    active_days VARCHAR(128) DEFAULT 'mon,tue,wed,thu,fri',
+    day_of_month INTEGER DEFAULT 1,
+    cron_expression VARCHAR(64) DEFAULT '0 9 * * 1-5',
+    skip_holidays BOOLEAN DEFAULT TRUE,
+    refresh_data_first BOOLEAN DEFAULT TRUE,
+    notify_triggers JSONB DEFAULT '{"runFails": true, "dataBlockers": true, "runCompletes": true}'::jsonb,
+    last_run_at TIMESTAMP WITH TIME ZONE,
+    next_run_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS schedules_weekly (
     schedule_id VARCHAR(64) PRIMARY KEY,
     frequency VARCHAR(32) NOT NULL DEFAULT 'Weekly',
     day_of_week VARCHAR(16) DEFAULT 'Monday',
     time_of_day VARCHAR(16) DEFAULT '09:00',
-    is_enabled BOOLEAN DEFAULT FALSE,
+    is_enabled BOOLEAN DEFAULT TRUE,
     auto_run BOOLEAN DEFAULT TRUE,
     notify_on_complete BOOLEAN DEFAULT TRUE,
+    profile_id VARCHAR(64),
+    profile_name VARCHAR(128),
+    notification_email TEXT,
+    timezone VARCHAR(64) DEFAULT 'Asia/Kolkata',
+    daily_type VARCHAR(32) DEFAULT 'trading_days',
+    active_days VARCHAR(128) DEFAULT 'mon',
+    day_of_month INTEGER DEFAULT 1,
+    cron_expression VARCHAR(64) DEFAULT '0 9 * * 1-5',
+    skip_holidays BOOLEAN DEFAULT TRUE,
+    refresh_data_first BOOLEAN DEFAULT TRUE,
+    notify_triggers JSONB DEFAULT '{"runFails": true, "dataBlockers": true, "runCompletes": true}'::jsonb,
+    last_run_at TIMESTAMP WITH TIME ZONE,
+    next_run_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS schedules_monthly (
+    schedule_id VARCHAR(64) PRIMARY KEY,
+    frequency VARCHAR(32) NOT NULL DEFAULT 'Monthly',
+    day_of_week VARCHAR(16) DEFAULT 'Monday',
+    time_of_day VARCHAR(16) DEFAULT '09:00',
+    is_enabled BOOLEAN DEFAULT TRUE,
+    auto_run BOOLEAN DEFAULT TRUE,
+    notify_on_complete BOOLEAN DEFAULT TRUE,
+    profile_id VARCHAR(64),
+    profile_name VARCHAR(128),
+    notification_email TEXT,
+    timezone VARCHAR(64) DEFAULT 'Asia/Kolkata',
+    daily_type VARCHAR(32) DEFAULT 'trading_days',
+    active_days VARCHAR(128) DEFAULT 'mon',
+    day_of_month INTEGER DEFAULT 1,
+    cron_expression VARCHAR(64) DEFAULT '0 9 * * 1-5',
+    skip_holidays BOOLEAN DEFAULT TRUE,
+    refresh_data_first BOOLEAN DEFAULT TRUE,
+    notify_triggers JSONB DEFAULT '{"runFails": true, "dataBlockers": true, "runCompletes": true}'::jsonb,
+    last_run_at TIMESTAMP WITH TIME ZONE,
+    next_run_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS schedules_custom (
+    schedule_id VARCHAR(64) PRIMARY KEY,
+    frequency VARCHAR(32) NOT NULL DEFAULT 'Custom',
+    day_of_week VARCHAR(16) DEFAULT 'Monday',
+    time_of_day VARCHAR(16) DEFAULT '09:00',
+    is_enabled BOOLEAN DEFAULT TRUE,
+    auto_run BOOLEAN DEFAULT TRUE,
+    notify_on_complete BOOLEAN DEFAULT TRUE,
+    profile_id VARCHAR(64),
+    profile_name VARCHAR(128),
+    notification_email TEXT,
+    timezone VARCHAR(64) DEFAULT 'Asia/Kolkata',
+    daily_type VARCHAR(32) DEFAULT 'trading_days',
+    active_days VARCHAR(128) DEFAULT 'mon,tue,wed,thu,fri',
+    day_of_month INTEGER DEFAULT 1,
+    cron_expression VARCHAR(64) DEFAULT '0 9 * * 1-5',
+    skip_holidays BOOLEAN DEFAULT TRUE,
+    refresh_data_first BOOLEAN DEFAULT TRUE,
+    notify_triggers JSONB DEFAULT '{"runFails": true, "dataBlockers": true, "runCompletes": true}'::jsonb,
+    last_run_at TIMESTAMP WITH TIME ZONE,
+    next_run_at TIMESTAMP WITH TIME ZONE,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -747,6 +940,7 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMP WITH TIME ZONE;")
                 cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMP WITH TIME ZONE;")
                 cursor.execute("ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR(32) DEFAULT 'instant';")
+                cursor.execute("ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS notification_email TEXT;")
                 conn.commit()
                 logger.info("PostgreSQL persistence tables verified/created successfully.")
             else:

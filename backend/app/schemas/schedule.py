@@ -1,7 +1,7 @@
 """Screening schedule configuration schemas."""
 
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -51,9 +51,24 @@ class ScheduleConfigSchema(BaseModel):
             return "08:30"
 
 
+class NextRunItemSchema(BaseModel):
+    """Detailed item for an upcoming run with schedule context."""
+    datetime: str
+    schedule_id: str
+    frequency: str
+    time_of_day: str
+    profile_name: str
+    label: str
+    notification_email: Optional[str] = None
+    timezone: str = Field(default="Asia/Kolkata", description="Target execution timezone")
+
+
 class ScheduleResponse(BaseModel):
     """Response returned upon schedule retrieval or update."""
     success: bool = True
     message: str = "Schedule updated successfully"
-    schedule: ScheduleConfigSchema
+    schedule: Optional[ScheduleConfigSchema] = None
+    schedules: List[ScheduleConfigSchema] = []
     next_runs: List[str] = []
+    next_runs_detailed: List[NextRunItemSchema] = []
+    next_runs_by_frequency: Dict[str, List[str]] = Field(default_factory=dict)

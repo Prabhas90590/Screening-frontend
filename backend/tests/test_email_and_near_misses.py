@@ -1,3 +1,4 @@
+from pathlib import Path
 """Validation test for dynamic email notifications and Near Misses Excel integration."""
 
 import os
@@ -7,7 +8,7 @@ from io import BytesIO
 import openpyxl
 
 # Add backend to sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__))))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.models.screening_run import ScreeningResultRecord, FunnelCountRecord
 from app.schemas.screening import ScreeningRunRequest

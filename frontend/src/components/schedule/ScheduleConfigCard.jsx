@@ -35,12 +35,61 @@ function format12to24(time12 = '08:30', period = 'AM') {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-const TimePickerWithAmPm = ({ value24, onChange, timezone }) => {
+export const FINANCIAL_TIMEZONES = [
+  { value: 'Asia/Kolkata', label: 'Asia/Kolkata (IST · UTC+5:30)', abbr: 'IST', city: 'Mumbai / Delhi' },
+  { value: 'America/New_York', label: 'America/New_York (US Eastern · NYSE / NASDAQ)', abbr: 'EST', city: 'New York' },
+  { value: 'America/Chicago', label: 'America/Chicago (US Central · CME)', abbr: 'CST', city: 'Chicago' },
+  { value: 'America/Los_Angeles', label: 'America/Los_Angeles (US Pacific)', abbr: 'PST', city: 'San Francisco' },
+  { value: 'Europe/London', label: 'Europe/London (UK · LSE)', abbr: 'GMT', city: 'London' },
+  { value: 'Europe/Frankfurt', label: 'Europe/Frankfurt (Germany · XETRA)', abbr: 'CET', city: 'Frankfurt' },
+  { value: 'Asia/Tokyo', label: 'Asia/Tokyo (Japan · TSE)', abbr: 'JST', city: 'Tokyo' },
+  { value: 'Asia/Hong_Kong', label: 'Asia/Hong_Kong (Hong Kong · HKEX)', abbr: 'HKT', city: 'Hong Kong' },
+  { value: 'Asia/Singapore', label: 'Asia/Singapore (Singapore · SGX)', abbr: 'SGT', city: 'Singapore' },
+  { value: 'UTC', label: 'UTC (Coordinated Universal Time)', abbr: 'UTC', city: 'Universal' },
+];
+
+function getTimezoneConversionPreview(time24, sourceTz) {
+  if (!time24 || !sourceTz) return null;
+  try {
+    const [h, m] = time24.split(':').map(Number);
+    const now = new Date();
+    const d = new Date();
+    const invDate = new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }));
+    const targetDate = new Date(d.toLocaleString('en-US', { timeZone: sourceTz }));
+    const diffMs = targetDate.getTime() - invDate.getTime();
+    
+    const sourceUtcMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0) - diffMs;
+    const resolved = new Date(sourceUtcMs);
+    
+    const istStr = resolved.toLocaleTimeString('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    const utcStr = resolved.toLocaleTimeString('en-US', {
+      timeZone: 'UTC',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    return {
+      ist: `${istStr} IST`,
+      utc: `${utcStr} UTC`,
+      isIST: sourceTz === 'Asia/Kolkata' || sourceTz === 'Asia/Calcutta',
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+const TimePickerWithAmPm = ({ value24, onChange, timezone, onTimezoneChange }) => {
   const parsed = parse24to12(value24);
   const [localText, setLocalText] = useState(parsed.time12);
   const [currentPeriod, setCurrentPeriod] = useState(parsed.period);
 
-  // Sync from props only when value24 changes externally (e.g. preset buttons clicked)
   useEffect(() => {
     const p = parse24to12(value24);
     setLocalText(p.time12);
@@ -71,10 +120,8 @@ const TimePickerWithAmPm = ({ value24, onChange, timezone }) => {
 
   const handleInputChange = (e) => {
     const val = e.target.value;
-    // Allow digits and colon up to 5 characters
     if (/^[0-9:]*$/.test(val) && val.length <= 5) {
       setLocalText(val);
-      // Auto-commit if user types full "HH:MM" e.g. "10:45"
       if (/^\d{1,2}:\d{2}$/.test(val)) {
         commitTime(val, currentPeriod);
       }
@@ -98,48 +145,78 @@ const TimePickerWithAmPm = ({ value24, onChange, timezone }) => {
     onChange(new24);
   };
 
+  const tzObj = FINANCIAL_TIMEZONES.find((t) => t.value === timezone) || FINANCIAL_TIMEZONES[0];
+  const conversion = getTimezoneConversionPreview(value24, timezone || 'Asia/Kolkata');
+
   return (
-    <div className="flex items-center space-x-2">
-      <div className="flex items-center border border-slate-300 rounded overflow-hidden shadow-2xs bg-white focus-within:border-[#146b63]">
-        <input
-          type="text"
-          value={localText}
-          onChange={handleInputChange}
-          onBlur={handleBlur}
-          onKeyDown={handleKeyDown}
-          placeholder="08:30"
-          className="w-16 px-2.5 py-1 text-slate-800 font-mono text-xs focus:outline-hidden"
-          title="Type time in 12-hour format (e.g. 10:45) and toggle AM/PM"
-        />
-        <div className="flex border-l border-slate-200 bg-slate-50 text-[11px] font-semibold">
-          <button
-            type="button"
-            onClick={() => handlePeriodChange('AM')}
-            className={`px-2 py-1 transition-colors cursor-pointer ${
-              currentPeriod === 'AM'
-                ? 'bg-[#146b63] text-white font-bold'
-                : 'text-slate-600 hover:bg-slate-200/60'
-            }`}
-          >
-            AM
-          </button>
-          <button
-            type="button"
-            onClick={() => handlePeriodChange('PM')}
-            className={`px-2 py-1 transition-colors cursor-pointer ${
-              currentPeriod === 'PM'
-                ? 'bg-[#146b63] text-white font-bold'
-                : 'text-slate-600 hover:bg-slate-200/60'
-            }`}
-          >
-            PM
-          </button>
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        {/* 12-hr Time Input with AM/PM */}
+        <div className="flex items-center border border-slate-300 rounded overflow-hidden shadow-2xs bg-white focus-within:border-[#146b63]">
+          <input
+            type="text"
+            value={localText}
+            onChange={handleInputChange}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            placeholder="08:30"
+            className="w-16 px-2.5 py-1 text-slate-800 font-mono text-xs focus:outline-hidden"
+            title="Type time in 12-hour format (e.g. 10:45) and toggle AM/PM"
+          />
+          <div className="flex border-l border-slate-200 bg-slate-50 text-[11px] font-semibold">
+            <button
+              type="button"
+              onClick={() => handlePeriodChange('AM')}
+              className={`px-2 py-1 transition-colors cursor-pointer ${
+                currentPeriod === 'AM'
+                  ? 'bg-[#146b63] text-white font-bold'
+                  : 'text-slate-600 hover:bg-slate-200/60'
+              }`}
+            >
+              AM
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePeriodChange('PM')}
+              className={`px-2 py-1 transition-colors cursor-pointer ${
+                currentPeriod === 'PM'
+                  ? 'bg-[#146b63] text-white font-bold'
+                  : 'text-slate-600 hover:bg-slate-200/60'
+              }`}
+            >
+              PM
+            </button>
+          </div>
         </div>
+
+        {/* Timezone Selector Dropdown */}
+        <select
+          value={timezone || 'Asia/Kolkata'}
+          onChange={(e) => onTimezoneChange && onTimezoneChange(e.target.value)}
+          className="text-[11px] font-mono bg-white border border-slate-300 rounded px-2.5 py-1 text-slate-700 font-medium focus:outline-hidden focus:border-[#146b63] cursor-pointer shadow-2xs"
+          title="Select execution timezone for this schedule"
+        >
+          {FINANCIAL_TIMEZONES.map((tz) => (
+            <option key={tz.value} value={tz.value}>
+              {tz.label}
+            </option>
+          ))}
+        </select>
       </div>
-      {timezone && (
-        <span className="text-slate-500 bg-white border border-slate-200 px-2.5 py-1 rounded text-[11px] font-mono">
-          {timezone}
-        </span>
+
+      {/* Live Dual-Time Conversion Helper */}
+      {conversion && (
+        <div className="text-[11px] text-slate-500 font-medium flex items-center space-x-1.5">
+          <span className="text-[#146b63]">🕒</span>
+          <span>
+            <strong>{localText} {currentPeriod} ({tzObj.abbr})</strong>{' '}
+            {conversion.isIST ? (
+              <span>corresponds to <strong>{conversion.utc}</strong></span>
+            ) : (
+              <span>will execute at <strong className="text-slate-800">{conversion.ist}</strong> ({conversion.utc})</span>
+            )}
+          </span>
+        </div>
       )}
     </div>
   );
@@ -148,8 +225,10 @@ const TimePickerWithAmPm = ({ value24, onChange, timezone }) => {
 export const ScheduleConfigCard = () => {
   const {
     scheduleConfig,
+    allSchedules = [],
     updateScheduleConfig,
     saveScheduleToBackend,
+    deleteScheduleFromBackend,
     nextRuns,
     triggerRunNow,
     isScreeningRunning,
@@ -180,6 +259,46 @@ export const ScheduleConfigCard = () => {
     { id: 'fri', label: 'Fri' },
   ];
   const frequencies = ['Daily', 'Weekly', 'Monthly', 'Custom'];
+
+  const isEditing = Boolean(scheduleConfig?.scheduleId);
+
+  const handleSelectScheduleToEdit = (s) => {
+    updateScheduleConfig({
+      scheduleId: s.schedule_id,
+      profile: s.profile_name,
+      selectedProfileId: s.profile_id,
+      frequency: s.frequency,
+      dailyType: s.daily_type || 'trading_days',
+      activeDays: s.active_days || ['mon', 'tue', 'wed', 'thu', 'fri'],
+      dayOfMonth: s.day_of_month || 1,
+      time: s.time_of_day || '08:30',
+      timezone: s.timezone || 'Asia/Kolkata',
+      cronExpression: s.cron_expression || '0 9 * * 1-5',
+      refreshDataFirst: s.refresh_data_first ?? true,
+      skipHolidays: s.skip_holidays ?? true,
+      notifyEmail: s.notification_email || '',
+      notifyTriggers: s.notify_triggers,
+      isEnabled: s.is_enabled ?? true,
+    });
+  };
+
+  const handleCreateNewSchedule = () => {
+    updateScheduleConfig({
+      scheduleId: '',
+      time: '08:30',
+      frequency: 'Daily',
+      notifyEmail: '',
+    });
+  };
+
+  const handleDeleteSchedule = async (schedId, schedLabel) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete the schedule "${schedLabel}"?\n\nThis will remove it and cancel all future automated runs.`
+    );
+    if (confirmed && deleteScheduleFromBackend) {
+      await deleteScheduleFromBackend(schedId);
+    }
+  };
 
   // Current selected profile
   const selectedProfile =
@@ -213,9 +332,19 @@ export const ScheduleConfigCard = () => {
 
     setProfileError(false);
     activateProfile(profile.id);
+
+    // Look up if a customized email already exists for this profile in saved schedules
+    const existingSchedule = allSchedules.find(
+      (s) =>
+        s.profile_id === profile.id ||
+        (s.profile_name && (s.profile_name === profile.name || s.profile_name.startsWith(profile.name)))
+    );
+    const profileEmail = existingSchedule?.notification_email || scheduleConfig.notifyEmail || '';
+
     updateScheduleConfig({
       profile: `${profile.name} - Version ${profile.versionNumber}`,
       selectedProfileId: profile.id,
+      notifyEmail: profileEmail,
     });
   };
 
@@ -228,11 +357,11 @@ export const ScheduleConfigCard = () => {
     });
   };
 
-  const handleSave = async () => {
+  const handleSave = async (forceNew = false) => {
     setIsSaving(true);
     try {
       if (saveScheduleToBackend) {
-        await saveScheduleToBackend();
+        await saveScheduleToBackend({}, forceNew);
       }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
@@ -282,7 +411,6 @@ export const ScheduleConfigCard = () => {
         <div>
           <h2 className="text-base font-bold text-slate-800 flex items-center space-x-2">
             <span>{activeFrequency} Automated Screening</span>
-            <span className="text-xs font-normal text-slate-400">| Phase 17 Scheduler</span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Automatically executes institutional screening rules and emails reports at target market hours.
@@ -305,6 +433,150 @@ export const ScheduleConfigCard = () => {
           </button>
         </div>
       </div>
+
+      {/* Active Saved Schedules Management Section */}
+      {allSchedules && allSchedules.length > 0 ? (
+        <div className="bg-slate-50/90 border border-slate-200 rounded-lg p-3.5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                Active Saved Schedules ({allSchedules.length})
+              </span>
+              <span className="text-[10px] text-slate-400 font-normal">
+                Click Edit to modify or Delete to remove
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleCreateNewSchedule}
+              className="text-xs text-[#146b63] hover:text-[#0f5750] font-semibold cursor-pointer flex items-center space-x-1 bg-white hover:bg-slate-100 border border-slate-200 px-2.5 py-1 rounded shadow-2xs transition-colors"
+            >
+              <span>+</span>
+              <span>Create New Schedule</span>
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {allSchedules.map((s) => {
+              const isCurrent =
+                scheduleConfig?.scheduleId === s.schedule_id ||
+                (!scheduleConfig?.scheduleId &&
+                  scheduleConfig?.time === s.time_of_day &&
+                  scheduleConfig?.frequency === s.frequency);
+
+              return (
+                <div
+                  key={s.schedule_id}
+                  className={`p-2.5 rounded-md border transition-all flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ${
+                    isCurrent
+                      ? 'bg-teal-50/70 border-[#146b63] ring-1 ring-[#146b63]/20 shadow-2xs'
+                      : 'bg-white border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <span className={`p-1.5 rounded text-xs ${isCurrent ? 'bg-[#146b63] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                      ⏰
+                    </span>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-slate-800 text-xs">
+                          {s.frequency} @ {s.time_of_day} IST
+                        </span>
+                        {isCurrent && (
+                          <span className="px-1.5 py-0.2 bg-[#146b63] text-white text-[9px] font-bold rounded">
+                            Editing Now
+                          </span>
+                        )}
+                        <span
+                          className={`px-1.5 py-0.2 rounded text-[9px] font-semibold ${
+                            s.is_enabled
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-amber-50 text-amber-700 border border-amber-200'
+                          }`}
+                        >
+                          {s.is_enabled ? 'Active' : 'Paused'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-1.5 mt-0.5">
+                        <span>Strategy: <strong className="text-slate-700">{s.profile_name || 'Default'}</strong></span>
+                        <span>•</span>
+                        <span>Delivery: <span className="font-mono text-slate-600">{s.notification_email || 'Default'}</span></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-1.5 self-end sm:self-center shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectScheduleToEdit(s)}
+                      className={`px-2.5 py-1 text-xs font-semibold rounded border transition-colors cursor-pointer flex items-center space-x-1 ${
+                        isCurrent
+                          ? 'bg-[#146b63] text-white border-[#146b63]'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-[#146b63]'
+                      }`}
+                      title="Edit this schedule's time, profile, or recipients"
+                    >
+                      <span>✏️</span>
+                      <span>{isCurrent ? 'Editing' : 'Edit'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleDeleteSchedule(
+                          s.schedule_id,
+                          `${s.frequency} @ ${s.time_of_day} IST (${s.profile_name || 'Strategy'})`
+                        )
+                      }
+                      className="px-2.5 py-1 text-xs font-semibold rounded border border-rose-200 text-rose-600 bg-rose-50/50 hover:bg-rose-100 transition-colors cursor-pointer flex items-center space-x-1"
+                      title="Delete this schedule permanently"
+                    >
+                      <span>🗑️</span>
+                      <span>Delete</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-slate-50 border border-dashed border-slate-200 rounded-lg p-4 text-center space-y-1">
+          <span className="text-base">📅</span>
+          <div className="text-xs font-semibold text-slate-700">No Automated Schedules Configured</div>
+          <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+            Configure your strategy profile, execution time, timezone, and notification emails below, then click <strong>+ Save New Schedule</strong>.
+          </p>
+        </div>
+      )}
+
+      {/* Editing Mode Alert Banner */}
+      {isEditing && (
+        <div className="bg-teal-50 border border-teal-200 rounded-lg p-3 flex items-center justify-between shadow-2xs">
+          <div className="flex items-center space-x-2.5">
+            <span className="p-1.5 rounded bg-[#146b63] text-white text-xs">✏️</span>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="font-bold text-[#146b63] text-xs">
+                  Editing Schedule: {scheduleConfig.frequency} @ {scheduleConfig.time} IST
+                </span>
+                <span className="px-1.5 py-0.2 bg-teal-100 text-[#146b63] text-[10px] font-mono rounded">
+                  {scheduleConfig.scheduleId}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600">
+                Update parameters below and click <strong>Update Schedule</strong>, or delete this schedule.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleCreateNewSchedule}
+            className="px-2.5 py-1 text-xs bg-white hover:bg-slate-100 border border-slate-200 rounded text-slate-700 font-semibold cursor-pointer shadow-2xs transition-colors shrink-0"
+          >
+            ✕ Cancel Edit (New Schedule)
+          </button>
+        </div>
+      )}
 
       <div className="space-y-5 text-xs">
         {/* 1. Strategy Profile Selection */}
@@ -345,7 +617,27 @@ export const ScheduleConfigCard = () => {
                 <button
                   key={freq}
                   type="button"
-                  onClick={() => updateScheduleConfig({ frequency: freq })}
+                  onClick={() => {
+                    // Switching cadence cancels edit mode of different frequency
+                    const isDifferent = scheduleConfig?.scheduleId && scheduleConfig?.frequency !== freq;
+                    let nextDays = scheduleConfig?.activeDays;
+                    if (freq === 'Daily') {
+                      if (!nextDays || nextDays.length <= 1) {
+                        nextDays = (scheduleConfig?.dailyType === 'all_days')
+                          ? ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+                          : ['mon', 'tue', 'wed', 'thu', 'fri'];
+                      }
+                    } else if (freq === 'Weekly') {
+                      if (!nextDays || nextDays.length > 2) {
+                        nextDays = ['mon'];
+                      }
+                    }
+                    updateScheduleConfig({
+                      frequency: freq,
+                      activeDays: nextDays,
+                      scheduleId: isDifferent ? '' : (scheduleConfig?.scheduleId || ''),
+                    });
+                  }}
                   className={`flex-1 py-1.5 text-center text-xs font-medium transition-colors cursor-pointer ${
                     isActive
                       ? 'bg-[#146b63] text-white font-semibold'
@@ -377,7 +669,12 @@ export const ScheduleConfigCard = () => {
                     name="dailyType"
                     value="trading_days"
                     checked={dailyType === 'trading_days'}
-                    onChange={() => updateScheduleConfig({ dailyType: 'trading_days' })}
+                    onChange={() =>
+                      updateScheduleConfig({
+                        dailyType: 'trading_days',
+                        activeDays: ['mon', 'tue', 'wed', 'thu', 'fri'],
+                      })
+                    }
                     className="accent-[#146b63]"
                   />
                   <span className="font-medium">Every Trading Day (Mon–Fri)</span>
@@ -388,11 +685,55 @@ export const ScheduleConfigCard = () => {
                     name="dailyType"
                     value="all_days"
                     checked={dailyType === 'all_days'}
-                    onChange={() => updateScheduleConfig({ dailyType: 'all_days' })}
+                    onChange={() =>
+                      updateScheduleConfig({
+                        dailyType: 'all_days',
+                        activeDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+                      })
+                    }
                     className="accent-[#146b63]"
                   />
                   <span>Every Calendar Day (7 Days)</span>
                 </label>
+              </div>
+            </div>
+
+            {/* Daily Active Days (Visual selector & toggler) */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label className="text-slate-600 font-medium">Active Days</label>
+              <div className="col-span-3 flex flex-wrap items-center gap-2">
+                {(dailyType === 'all_days'
+                  ? [
+                      { id: 'mon', label: 'Mon' },
+                      { id: 'tue', label: 'Tue' },
+                      { id: 'wed', label: 'Wed' },
+                      { id: 'thu', label: 'Thu' },
+                      { id: 'fri', label: 'Fri' },
+                      { id: 'sat', label: 'Sat' },
+                      { id: 'sun', label: 'Sun' },
+                    ]
+                  : daysOfWeek
+                ).map((day) => {
+                  const isSelected = (scheduleConfig.activeDays || []).includes(day.id);
+                  return (
+                    <button
+                      key={day.id}
+                      type="button"
+                      onClick={() => toggleDay(day.id)}
+                      className={`px-3 py-1 rounded text-xs font-semibold flex items-center justify-center transition-colors cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#146b63] text-white shadow-xs'
+                          : 'bg-white border border-slate-300 text-slate-500 hover:bg-slate-100'
+                      }`}
+                      title={`Toggle ${day.label}`}
+                    >
+                      {day.label}
+                    </button>
+                  );
+                })}
+                <span className="text-[11px] text-slate-400">
+                  {dailyType === 'trading_days' ? '(Mon–Fri)' : '(7 Days / Week)'}
+                </span>
               </div>
             </div>
 
@@ -435,6 +776,7 @@ export const ScheduleConfigCard = () => {
                     value24={timeValue}
                     onChange={(new24) => updateScheduleConfig({ time: new24 })}
                     timezone={timezoneValue}
+                    onTimezoneChange={(newTz) => updateScheduleConfig({ timezone: newTz })}
                   />
                 </div>
               </div>
@@ -509,6 +851,7 @@ export const ScheduleConfigCard = () => {
                   value24={timeValue}
                   onChange={(new24) => updateScheduleConfig({ time: new24 })}
                   timezone={timezoneValue}
+                  onTimezoneChange={(newTz) => updateScheduleConfig({ timezone: newTz })}
                 />
               </div>
             </div>
@@ -570,6 +913,7 @@ export const ScheduleConfigCard = () => {
                   value24={timeValue}
                   onChange={(new24) => updateScheduleConfig({ time: new24 })}
                   timezone={timezoneValue}
+                  onTimezoneChange={(newTz) => updateScheduleConfig({ timezone: newTz })}
                 />
               </div>
             </div>
@@ -625,7 +969,7 @@ export const ScheduleConfigCard = () => {
             <div className="relative max-w-md">
               <input
                 type="text"
-                placeholder="e.g. prabhas.muthyala@zeniusit.com, manoj@zenius.com"
+                placeholder="e.g. prabhas.muthyala@zeniusit.com, manoj@zeniusit.com"
                 value={scheduleConfig.notifyEmail || ''}
                 onChange={(e) => {
                   setEmailTouched(true);
@@ -720,21 +1064,79 @@ export const ScheduleConfigCard = () => {
       </div>
 
       {/* Action Buttons */}
-      <div className="pt-2 flex items-center space-x-3 border-t border-slate-100">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={isSaving}
-          className="px-5 py-2.5 bg-[#146b63] hover:bg-[#0f5750] text-white text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer flex items-center space-x-1.5"
-        >
-          {isSaving ? (
-            <span>Saving...</span>
-          ) : saveSuccess ? (
-            <span>✓ Schedule Saved to Database!</span>
+      <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100">
+        <div className="flex items-center space-x-2.5">
+          {isEditing ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleSave(false)}
+                disabled={isSaving}
+                className="px-5 py-2.5 bg-[#146b63] hover:bg-[#0f5750] text-white text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer flex items-center space-x-1.5"
+              >
+                {isSaving ? (
+                  <span>Updating...</span>
+                ) : saveSuccess ? (
+                  <span>✓ Schedule Updated!</span>
+                ) : (
+                  <span>✓ Update Schedule</span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSave(true)}
+                disabled={isSaving}
+                className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-[#146b63] border border-[#146b63]/30 text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer flex items-center space-x-1"
+                title="Save these settings as a brand new independent schedule"
+              >
+                <span>+</span>
+                <span>Save As New Schedule</span>
+              </button>
+            </div>
           ) : (
-            <span>Save Schedule</span>
+            <button
+              type="button"
+              onClick={() => handleSave(false)}
+              disabled={isSaving}
+              className="px-5 py-2.5 bg-[#146b63] hover:bg-[#0f5750] text-white text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer flex items-center space-x-1.5"
+            >
+              {isSaving ? (
+                <span>Saving...</span>
+              ) : saveSuccess ? (
+                <span>✓ Schedule Saved!</span>
+              ) : (
+                <span>+ Save New Schedule</span>
+              )}
+            </button>
           )}
-        </button>
+
+          {isEditing && (
+            <button
+              type="button"
+              onClick={() =>
+                handleDeleteSchedule(
+                  scheduleConfig.scheduleId,
+                  `${scheduleConfig.frequency} @ ${scheduleConfig.time} IST`
+                )
+              }
+              className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-md transition-colors cursor-pointer flex items-center space-x-1.5"
+              title="Delete this schedule permanently"
+            >
+              <span>🗑️</span>
+              <span>Delete Schedule</span>
+            </button>
+          )}
+
+          {isEditing && (
+            <button
+              type="button"
+              onClick={handleCreateNewSchedule}
+              className="px-3 py-2 text-xs text-slate-500 hover:text-slate-800 font-medium cursor-pointer"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
 
         {/* RUN NOW - Instant Execution */}
         <button

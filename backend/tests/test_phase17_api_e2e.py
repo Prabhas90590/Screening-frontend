@@ -1,9 +1,10 @@
+from pathlib import Path
 """End-to-end API test for Phase 17 Scheduler endpoints."""
 
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__))))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient
 from app.main import app
@@ -29,7 +30,7 @@ def test_schedules_api_endpoints():
         "daily_type": "trading_days",
         "time_of_day": "08:30",
         "timezone": "Asia/Kolkata",
-        "notification_email": "prabhas.muthyala@zeniusit.com, manoj@zenius.com",
+        "notification_email": "prabhas.muthyala@zeniusit.com, manoj@zeniusit.com",
         "is_enabled": True,
         "auto_run": True,
         "refresh_data_first": True,
