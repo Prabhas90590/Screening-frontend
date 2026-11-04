@@ -112,12 +112,7 @@ class ScreeningService:
         start_time = time.perf_counter()
         now = datetime.now(timezone.utc)
 
-        # 1. Validate markets
-        clean_countries, clean_exchanges = self.validate_market_selection(
-            request.countries, request.exchanges
-        )
-
-        # 2. Resolve Rule Profile
+        # 1. Resolve Rule Profile
         active_version = None
         if request.rule_version_id:
             active_version = self.rule_repo.get_version_by_id(request.rule_version_id)
@@ -143,13 +138,32 @@ class ScreeningService:
             profile_name = request.profile_name or "Custom Strategy"
             rule_version_id = "prof-custom"
 
-        # Check if the active_version saved a specific exchange universe in its snapshot (only if not specified)
-        if not clean_exchanges and active_version:
+        # 2. Resolve Countries and Exchanges (Inherit from Profile snapshot if omitted)
+        req_countries = list(request.countries) if request.countries else []
+        req_exchanges = list(request.exchanges) if request.exchanges else []
+
+        if active_version:
             saved_snapshot = getattr(active_version, "diversification_rules", {}).get("snapshot", {})
-            if saved_snapshot and "exchanges" in saved_snapshot:
+            if not req_countries and saved_snapshot and "countries" in saved_snapshot:
+                saved_cntrs = [c["id"].lower() for c in saved_snapshot["countries"] if c.get("selected")]
+                if saved_cntrs:
+                    req_countries = saved_cntrs
+
+            if not req_exchanges and saved_snapshot and "exchanges" in saved_snapshot:
                 saved_exchs = [e["id"].lower() for e in saved_snapshot["exchanges"] if e.get("selected")]
                 if saved_exchs:
-                    clean_exchanges = saved_exchs
+                    req_exchanges = saved_exchs
+
+        # Fallback to sensible defaults only if profile has no saved snapshot
+        if not req_countries:
+            req_countries = ["us", "in"]
+        if not req_exchanges:
+            req_exchanges = ["nasdaq", "nse"]
+
+        # Validate markets
+        clean_countries, clean_exchanges = self.validate_market_selection(
+            req_countries, req_exchanges
+        )
 
         # Target recipient email for notifications - strictly only what is given as input
         target_email = getattr(request, "notification_email", None)

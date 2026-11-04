@@ -619,12 +619,44 @@ class SchedulerService:
         logger.info(f"[SCHEDULER:RUN:START] Triggering scheduled run for profile '{config.profile_name}' (Schedule: {schedule_id})")
 
         from app.services.screening_service import screening_service
+        from app.repositories.rule_repository import rule_repository
+
+        target_countries = None
+        target_exchanges = None
+        target_prof_id = config.profile_id
+        prof = None
+        if target_prof_id:
+            prof = rule_repository.get_version_by_id(target_prof_id)
+        if not prof and config.profile_name:
+            all_profs = rule_repository.list_versions(limit=100)
+            for p in all_profs:
+                v_num = getattr(p, "version_number", "1.0")
+                if (
+                    p.profile_name.strip().lower() == config.profile_name.strip().lower()
+                    or f"{p.profile_name} - Version {v_num}".strip().lower() == config.profile_name.strip().lower()
+                    or f"{p.profile_name} v{v_num}".strip().lower() == config.profile_name.strip().lower()
+                ):
+                    prof = p
+                    target_prof_id = p.version_id
+                    break
+
+        if prof:
+            snapshot = getattr(prof, "diversification_rules", {}).get("snapshot", {})
+            if snapshot:
+                saved_c = [c["id"].lower() for c in snapshot.get("countries", []) if c.get("selected")]
+                saved_e = [e["id"].lower() for e in snapshot.get("exchanges", []) if e.get("selected")]
+                if saved_c:
+                    target_countries = saved_c
+                if saved_e:
+                    target_exchanges = saved_e
 
         request = ScreeningRunRequest(
-            rule_version_id=config.profile_id if config.profile_id else None,
+            rule_version_id=target_prof_id if target_prof_id else None,
             profile_name=config.profile_name,
             notification_email=config.notification_email,
             trigger_type="scheduled",
+            countries=target_countries,
+            exchanges=target_exchanges,
         )
 
         try:

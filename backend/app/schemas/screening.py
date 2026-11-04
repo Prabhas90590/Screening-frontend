@@ -76,8 +76,8 @@ class FunnelStageCounts(BaseModel):
 
 class ScreeningRunRequest(BaseModel):
     """Payload to trigger a screening run for selected markets and rules."""
-    countries: List[str] = Field(default_factory=lambda: ["us", "in"], description="List of country IDs, e.g. ['us', 'ca', 'in']")
-    exchanges: List[str] = Field(default_factory=lambda: ["nasdaq", "nse"], description="List of exchange IDs, e.g. ['nasdaq', 'nyse', 'nse']")
+    countries: Optional[List[str]] = Field(default=None, description="List of country IDs, e.g. ['us', 'ca', 'in']. Defaults to profile snapshot.")
+    exchanges: Optional[List[str]] = Field(default=None, description="List of exchange IDs, e.g. ['nasdaq', 'nyse', 'nse']. Defaults to profile snapshot.")
     display_currency: str = Field(
         default="USD",
         description="Client-selected reporting currency for all values and market caps (default: '$' / 'USD')"

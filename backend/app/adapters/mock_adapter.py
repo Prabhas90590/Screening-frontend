@@ -304,7 +304,15 @@ class MockAdapter(BaseDataProvider):
     def __init__(self):
         from app.adapters.indian_stocks_fixtures import INDIAN_MOCK_SECURITIES
         from app.adapters.global_stocks_fixtures import GLOBAL_MOCK_SECURITIES
-        self._securities = RAW_MOCK_SECURITIES + INDIAN_MOCK_SECURITIES + GLOBAL_MOCK_SECURITIES
+        from app.adapters.expanded_universe_fixtures import EXPANDED_MOCK_SECURITIES
+        from app.adapters.expanded_indian_stocks_fixtures import EXPANDED_INDIAN_MOCK_SECURITIES
+        self._securities = (
+            RAW_MOCK_SECURITIES
+            + INDIAN_MOCK_SECURITIES
+            + GLOBAL_MOCK_SECURITIES
+            + EXPANDED_MOCK_SECURITIES
+            + EXPANDED_INDIAN_MOCK_SECURITIES
+        )
 
     @property
     def provider_name(self) -> str:
