@@ -2,3 +2,6 @@ fastapi
 uvicorn[standard]
 httpx
 psycopg2-binary
+bcrypt
+passlib[bcrypt]
+python-jose[cryptography]

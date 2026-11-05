@@ -31,6 +31,14 @@ from app.schemas.screening import (
     ScreeningRunRequest,
     ScreeningRunResponse,
 )
+from app.schemas.auth import (
+    UserSignupRequest,
+    UserLoginRequest,
+    UserProfileResponse,
+    AuthTokenResponse,
+    LogoutResponse,
+    SessionPingResponse,
+)
 
 __all__ = [
     "CountryBase",
@@ -56,4 +64,10 @@ __all__ = [
     "ScreenedSecurityResult",
     "ScreeningRunRequest",
     "ScreeningRunResponse",
+    "UserSignupRequest",
+    "UserLoginRequest",
+    "UserProfileResponse",
+    "AuthTokenResponse",
+    "LogoutResponse",
+    "SessionPingResponse",
 ]

@@ -12,6 +12,7 @@ from app.api.routes.rules import router as rules_router
 from app.api.routes.screening import router as screening_router
 from app.api.routes.decisions import router as decisions_router
 from app.api.routes.schedules import router as schedules_router
+from app.api.routes.auth import router as auth_router  # Phase 3 – Authentication
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
@@ -77,6 +78,7 @@ app.include_router(rules_router)
 app.include_router(holdings_router)
 app.include_router(decisions_router)
 app.include_router(schedules_router)
+app.include_router(auth_router)  # Phase 3 – Authentication
 
 
 @app.get("/", tags=["root"])

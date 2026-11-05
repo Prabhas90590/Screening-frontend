@@ -16,6 +16,8 @@ class DecisionRecord(BaseModel):
     decision_note: Optional[str] = None
     run_id: Optional[str] = None
     decided_by: str = "Analyst"
+    owner_email: Optional[str] = Field(default=None, description="User email owning this decision")
+    user_id: Optional[str] = Field(default=None, description="User UUID owning this decision")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

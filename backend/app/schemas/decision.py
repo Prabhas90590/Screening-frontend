@@ -15,12 +15,14 @@ class DecisionUpdateRequest(BaseModel):
     decision_note: Optional[str] = None
     run_id: Optional[str] = None
     decided_by: Optional[str] = "Analyst"
+    owner_email: Optional[str] = None
 
 
 class DecisionBulkSyncRequest(BaseModel):
     """Payload to bulk-sync all analyst Keep/Drop decisions upon Excel export."""
     profile_name: Optional[str] = None
     run_id: Optional[str] = None
+    owner_email: Optional[str] = None
     decisions: List[DecisionUpdateRequest] = Field(default_factory=list)
 
 
@@ -35,4 +37,6 @@ class DecisionResponse(BaseModel):
     decision_note: Optional[str] = None
     run_id: Optional[str] = None
     decided_by: str = "Analyst"
+    owner_email: Optional[str] = None
+    user_id: Optional[str] = None
     updated_at: datetime

@@ -4,12 +4,31 @@
 
 const API_BASE = '/api';
 
+// ============================================================================
+// AUTHENTICATION HELPERS
+// ============================================================================
+
+export function getStoredAuthToken() {
+  return localStorage.getItem('access_token') || null;
+}
+
+export function getAuthHeaders(extraHeaders = {}) {
+  const token = getStoredAuthToken();
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extraHeaders,
+  };
+}
+
 /**
  * Fetch the canonical catalog of all 16 screening metrics and their limits.
  */
 export async function fetchRuleCatalog() {
   try {
-    const res = await fetch(`${API_BASE}/rules/catalog`);
+    const res = await fetch(`${API_BASE}/rules/catalog`, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch rule catalog`);
     return await res.json();
   } catch (err) {
@@ -19,11 +38,13 @@ export async function fetchRuleCatalog() {
 }
 
 /**
- * Fetch all saved rule profiles from PostgreSQL.
+ * Fetch all saved rule profiles from PostgreSQL for current user.
  */
 export async function fetchProfiles() {
   try {
-    const res = await fetch(`${API_BASE}/rules/profiles`);
+    const res = await fetch(`${API_BASE}/rules/profiles`, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch profiles`);
     return await res.json();
   } catch (err) {
@@ -39,7 +60,7 @@ export async function createProfile(profileData) {
   try {
     const res = await fetch(`${API_BASE}/rules/profiles`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(profileData),
     });
     if (!res.ok) {
@@ -60,7 +81,7 @@ export async function updateProfile(versionId, updateData) {
   try {
     const res = await fetch(`${API_BASE}/rules/profiles/${encodeURIComponent(versionId)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(updateData),
     });
     if (!res.ok) {
@@ -81,6 +102,7 @@ export async function activateProfile(versionId) {
   try {
     const res = await fetch(`${API_BASE}/rules/profiles/${encodeURIComponent(versionId)}/activate`, {
       method: 'PUT',
+      headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to activate profile`);
     return await res.json();
@@ -97,6 +119,7 @@ export async function deleteProfile(versionId) {
   try {
     const res = await fetch(`${API_BASE}/rules/profiles/${encodeURIComponent(versionId)}`, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to delete profile`);
     return await res.json();
@@ -113,7 +136,7 @@ export async function initiateScreening(payload) {
   try {
     const res = await fetch(`${API_BASE}/screenings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
@@ -132,7 +155,9 @@ export async function initiateScreening(payload) {
  */
 export async function fetchScreeningRuns(limit = 50) {
   try {
-    const res = await fetch(`${API_BASE}/screenings?limit=${encodeURIComponent(limit)}`);
+    const res = await fetch(`${API_BASE}/screenings?limit=${encodeURIComponent(limit)}`, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch screening runs`);
     return await res.json();
   } catch (err) {
@@ -141,13 +166,17 @@ export async function fetchScreeningRuns(limit = 50) {
   }
 }
 
-
 /**
  * Fetch detailed screening results for a specific run from the database.
  */
 export async function fetchScreeningResults(runId, view = 'all', limit = 250) {
   try {
-    const res = await fetch(`${API_BASE}/screenings/${encodeURIComponent(runId)}/results?view=${encodeURIComponent(view)}&limit=${encodeURIComponent(limit)}`);
+    const res = await fetch(
+      `${API_BASE}/screenings/${encodeURIComponent(runId)}/results?view=${encodeURIComponent(view)}&limit=${encodeURIComponent(limit)}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch run results`);
     return await res.json();
   } catch (err) {
@@ -161,7 +190,12 @@ export async function fetchScreeningResults(runId, view = 'all', limit = 250) {
  */
 export async function fetchRunComparison(runId, prevRunId) {
   try {
-    const res = await fetch(`${API_BASE}/screenings/${encodeURIComponent(runId)}/compare/${encodeURIComponent(prevRunId)}`);
+    const res = await fetch(
+      `${API_BASE}/screenings/${encodeURIComponent(runId)}/compare/${encodeURIComponent(prevRunId)}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch run comparison`);
     return await res.json();
   } catch (err) {
@@ -175,7 +209,9 @@ export async function fetchRunComparison(runId, prevRunId) {
  */
 export async function fetchRunFunnel(runId) {
   try {
-    const res = await fetch(`${API_BASE}/screenings/${encodeURIComponent(runId)}/funnel`);
+    const res = await fetch(`${API_BASE}/screenings/${encodeURIComponent(runId)}/funnel`, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
@@ -199,8 +235,10 @@ export async function uploadHoldingsFile(file, portfolioName = 'Core Equity Fund
   formData.append('portfolio_name', portfolioName);
 
   try {
+    const token = getStoredAuthToken();
     const res = await fetch(`${API_BASE}/holdings/import`, {
       method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
     });
     if (!res.ok) {
@@ -222,7 +260,7 @@ export async function fetchHoldings(portfolioName = null) {
     const url = portfolioName
       ? `${API_BASE}/holdings?portfolio_name=${encodeURIComponent(portfolioName)}`
       : `${API_BASE}/holdings`;
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch holdings`);
     return await res.json();
   } catch (err) {
@@ -236,7 +274,9 @@ export async function fetchHoldings(portfolioName = null) {
  */
 export async function fetchHoldingsSummary(portfolioName = 'Core Equity Fund') {
   try {
-    const res = await fetch(`${API_BASE}/holdings/summary?portfolio_name=${encodeURIComponent(portfolioName)}`);
+    const res = await fetch(`${API_BASE}/holdings/summary?portfolio_name=${encodeURIComponent(portfolioName)}`, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch holdings summary`);
     return await res.json();
   } catch (err) {
@@ -252,7 +292,7 @@ export async function addManualHolding(holdingData) {
   try {
     const res = await fetch(`${API_BASE}/holdings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(holdingData),
     });
     if (!res.ok) {
@@ -273,6 +313,7 @@ export async function deleteHolding(holdingId) {
   try {
     const res = await fetch(`${API_BASE}/holdings/${encodeURIComponent(holdingId)}`, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to delete holding`);
     return await res.json();
@@ -290,7 +331,7 @@ export async function clearHoldings(portfolioName = null) {
     const url = portfolioName
       ? `${API_BASE}/holdings?portfolio_name=${encodeURIComponent(portfolioName)}`
       : `${API_BASE}/holdings`;
-    const res = await fetch(url, { method: 'DELETE' });
+    const res = await fetch(url, { method: 'DELETE', headers: getAuthHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to clear holdings`);
     return await res.json();
   } catch (err) {
@@ -299,7 +340,6 @@ export async function clearHoldings(portfolioName = null) {
   }
 }
 
-
 /**
  * Record or update an analyst Keep/Drop decision in PostgreSQL (Phase 16).
  */
@@ -307,7 +347,7 @@ export async function recordDecisionApi(decisionData) {
   try {
     const res = await fetch(`${API_BASE}/decisions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(decisionData),
     });
     if (!res.ok) {
@@ -330,7 +370,9 @@ export async function fetchDecisionsApi(runId = null, profileName = null) {
     if (runId) params.append('run_id', runId);
     if (profileName) params.append('profile_name', profileName);
     const qs = params.toString() ? `?${params.toString()}` : '';
-    const res = await fetch(`${API_BASE}/decisions${qs}`);
+    const res = await fetch(`${API_BASE}/decisions${qs}`, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch decisions`);
     return await res.json();
   } catch (err) {
@@ -339,7 +381,6 @@ export async function fetchDecisionsApi(runId = null, profileName = null) {
   }
 }
 
-
 /**
  * Bulk-sync all analyst Keep/Drop decisions upon Excel export to PostgreSQL (Phase 16).
  */
@@ -347,7 +388,7 @@ export async function syncDecisionsApi({ profile_name, run_id, decisions }) {
   try {
     const res = await fetch(`${API_BASE}/decisions/sync`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ profile_name, run_id, decisions }),
     });
     if (!res.ok) {
@@ -361,13 +402,14 @@ export async function syncDecisionsApi({ profile_name, run_id, decisions }) {
   }
 }
 
-
 /**
  * Phase 17: Fetch screening schedule configuration and upcoming next runs from backend.
  */
 export async function fetchScheduleConfig() {
   try {
-    const res = await fetch(`${API_BASE}/schedules`);
+    const res = await fetch(`${API_BASE}/schedules`, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch schedule`);
     return await res.json();
   } catch (err) {
@@ -383,7 +425,7 @@ export async function saveScheduleConfig(config) {
   try {
     const res = await fetch(`${API_BASE}/schedules`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(config),
     });
     if (!res.ok) {
@@ -404,6 +446,7 @@ export async function deleteScheduleConfig(scheduleId) {
   try {
     const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(scheduleId)}`, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -416,7 +459,6 @@ export async function deleteScheduleConfig(scheduleId) {
   }
 }
 
-
 /**
  * Permanently delete a screening run and its results from backend.
  */
@@ -424,6 +466,7 @@ export async function deleteScreeningRun(runId) {
   try {
     const res = await fetch(`${API_BASE}/screenings/${encodeURIComponent(runId)}`, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -443,6 +486,7 @@ export async function clearScreeningRuns() {
   try {
     const res = await fetch(`${API_BASE}/screenings`, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -462,6 +506,7 @@ export async function removeScheduleDay(scheduleId, day) {
   try {
     const res = await fetch(`${API_BASE}/schedules/${encodeURIComponent(scheduleId)}/days/${encodeURIComponent(day)}`, {
       method: 'DELETE',
+      headers: getAuthHeaders(),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -471,5 +516,89 @@ export async function removeScheduleDay(scheduleId, day) {
   } catch (err) {
     console.error('[API] Failed to remove day from schedule:', err.message);
     throw err;
+  }
+}
+
+// ============================================================================
+// AUTHENTICATION API SERVICES (Phase 5)
+// ============================================================================
+
+export async function loginApi(email, password) {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Login failed. Please check your credentials.');
+  }
+  return await res.json();
+}
+
+export async function signupApi(email, password, fullName = '') {
+  const res = await fetch(`${API_BASE}/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, full_name: fullName }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Sign up failed. Please try again.');
+  }
+  return await res.json();
+}
+
+export async function fetchMeApi(token) {
+  const authToken = token || getStoredAuthToken();
+  if (!authToken) throw new Error('No authentication token available');
+
+  const res = await fetch(`${API_BASE}/auth/me`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${authToken}`,
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const error = new Error(err.detail || 'Session expired or invalid');
+    error.status = res.status;
+    throw error;
+  }
+  return await res.json();
+}
+
+export async function pingSessionApi(token) {
+  const authToken = token || getStoredAuthToken();
+  if (!authToken) return null;
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/ping`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function logoutApi(token) {
+  const authToken = token || getStoredAuthToken();
+  if (!authToken) return { message: 'Logged out' };
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+    return await res.json();
+  } catch {
+    return { message: 'Logged out' };
   }
 }

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useAuth } from './AuthContext';
 import {
   INITIAL_COUNTRIES,
   INITIAL_DIVERSIFICATION,
@@ -241,7 +242,7 @@ export function computeProfileVersionDiff(newSnapshot, prevSnapshot) {
   return diffs.length > 0 ? diffs : ['No criteria modifications detected compared to previous version'];
 }
 
-function mapBackendProfilesToFrontend(backendProfiles) {
+function mapBackendProfilesToFrontend(backendProfiles, defaultInitials = 'AN') {
   const parsedProfiles = [];
   const parsedHistory = [];
 
@@ -260,6 +261,10 @@ function mapBackendProfilesToFrontend(backendProfiles) {
           : `${changes.length} change${changes.length === 1 ? '' : 's'} compared to v${versionNumber - 1}`)
       : `Saved screening rules (${versionStr})`;
 
+    const authorInitials = bp.owner_email
+      ? bp.owner_email.split('@')[0].toUpperCase().slice(0, 2)
+      : defaultInitials;
+
     const profileItem = {
       id: bp.version_id,
       profileKey,
@@ -268,6 +273,7 @@ function mapBackendProfilesToFrontend(backendProfiles) {
       description: bp.description || `Saved screening rules (${versionStr})`,
       version: versionStr,
       versionNumber,
+      owner_email: bp.owner_email,
       changes,
       selectedCountries,
       snapshot,
@@ -283,8 +289,9 @@ function mapBackendProfilesToFrontend(backendProfiles) {
       date: bp.updated_at
         ? new Date(bp.updated_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
         : 'Saved',
-      by: 'PM',
+      by: authorInitials,
       name: bp.profile_name,
+      owner_email: bp.owner_email,
       changeSummary,
       resultImpact: '-',
       changes,
@@ -349,6 +356,21 @@ const parseProfileRuleValue = (val) => {
 };
 
 export const ScreeningProvider = ({ children }) => {
+  const auth = useAuth ? useAuth() : null;
+  const user = auth?.user || null;
+  const userEmail = user?.email ? user.email.toLowerCase().trim() : 'guest';
+  const userInitials = user?.fullName
+    ? user.fullName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+    : (userEmail && userEmail !== 'guest' ? userEmail.slice(0, 2).toUpperCase() : 'AN');
+
+  const kSectorLimits = `screening_active_sector_limits_${userEmail}`;
+  const kSectors = `screening_active_sectors_${userEmail}`;
+  const kCountries = `screening_active_countries_${userEmail}`;
+  const kExchanges = `screening_active_exchanges_${userEmail}`;
+  const kDiversification = `screening_active_diversification_${userEmail}`;
+  const kRuleMetrics = `screening_active_rule_metrics_${userEmail}`;
+  const kProfilesCache = `screening_profiles_cache_${userEmail}`;
+  const kHistoryCache = `screening_history_cache_${userEmail}`;
   const [activeNav, setActiveNav] = useState('rules'); // 'rules' | 'results' | 'schedule'
   const [rulesTab, setRulesTab] = useState('profiles'); // 'configuration' | 'profiles'
   const [resultsTab, setResultsTab] = useState('top20'); // 'top20' | 'changes' | 'nearMisses' | 'myHoldings'
@@ -709,10 +731,10 @@ export const ScreeningProvider = ({ children }) => {
     };
   }, [selectedRunId, compareRunId]);
 
-  // Persistent workspace states across browser refreshes
+  // Persistent workspace states across browser refreshes (scoped per user)
   const [sectorLimits, setSectorLimits] = useState(() => {
     try {
-      const cached = localStorage.getItem('screening_active_sector_limits');
+      const cached = localStorage.getItem(kSectorLimits);
       return cached ? JSON.parse(cached) : INITIAL_SECTOR_LIMITS;
     } catch {
       return INITIAL_SECTOR_LIMITS;
@@ -721,7 +743,7 @@ export const ScreeningProvider = ({ children }) => {
 
   const [sectors, setSectors] = useState(() => {
     try {
-      const cached = localStorage.getItem('screening_active_sectors');
+      const cached = localStorage.getItem(kSectors);
       return cached ? JSON.parse(cached) : INITIAL_SECTORS;
     } catch {
       return INITIAL_SECTORS;
@@ -730,7 +752,7 @@ export const ScreeningProvider = ({ children }) => {
 
   const [countries, setCountries] = useState(() => {
     try {
-      const cached = localStorage.getItem('screening_active_countries');
+      const cached = localStorage.getItem(kCountries);
       return cached ? JSON.parse(cached) : INITIAL_COUNTRIES;
     } catch {
       return INITIAL_COUNTRIES;
@@ -739,7 +761,7 @@ export const ScreeningProvider = ({ children }) => {
 
   const [exchanges, setExchanges] = useState(() => {
     try {
-      const cached = localStorage.getItem('screening_active_exchanges');
+      const cached = localStorage.getItem(kExchanges);
       return cached ? JSON.parse(cached) : INITIAL_EXCHANGES;
     } catch {
       return INITIAL_EXCHANGES;
@@ -748,7 +770,7 @@ export const ScreeningProvider = ({ children }) => {
 
   const [diversification, setDiversification] = useState(() => {
     try {
-      const cached = localStorage.getItem('screening_active_diversification');
+      const cached = localStorage.getItem(kDiversification);
       return cached ? JSON.parse(cached) : INITIAL_DIVERSIFICATION;
     } catch {
       return INITIAL_DIVERSIFICATION;
@@ -760,11 +782,20 @@ export const ScreeningProvider = ({ children }) => {
   // Profiles and Version History with instant LocalStorage hydration & Backend sync
   const [profiles, setProfiles] = useState(() => {
     try {
-      const cached = localStorage.getItem('screening_profiles_cache');
+      const cached = localStorage.getItem(kProfilesCache);
       if (!cached) return [];
       const parsed = JSON.parse(cached);
       return Array.isArray(parsed)
-        ? parsed.filter((p) => p && p.name && p.id !== '1' && p.id !== '2' && p.id !== '3' && p.id !== '4')
+        ? parsed.filter(
+            (p) =>
+              p &&
+              p.name &&
+              p.id !== '1' &&
+              p.id !== '2' &&
+              p.id !== '3' &&
+              p.id !== '4' &&
+              (!p.owner_email || p.owner_email.toLowerCase() === userEmail)
+          )
         : [];
     } catch {
       return [];
@@ -773,11 +804,20 @@ export const ScreeningProvider = ({ children }) => {
 
   const [versionHistory, setVersionHistory] = useState(() => {
     try {
-      const cached = localStorage.getItem('screening_history_cache');
+      const cached = localStorage.getItem(kHistoryCache);
       if (!cached) return [];
       const parsed = JSON.parse(cached);
       return Array.isArray(parsed)
-        ? parsed.filter((v) => v && v.name && v.id !== '1' && v.id !== '2' && v.id !== '3' && v.id !== '4')
+        ? parsed.filter(
+            (v) =>
+              v &&
+              v.name &&
+              v.id !== '1' &&
+              v.id !== '2' &&
+              v.id !== '3' &&
+              v.id !== '4' &&
+              (!v.owner_email || v.owner_email.toLowerCase() === userEmail)
+          )
         : [];
     } catch {
       return [];
@@ -795,42 +835,42 @@ export const ScreeningProvider = ({ children }) => {
   useEffect(() => {
     try {
       if (editingVersion) {
-        localStorage.setItem('screening_active_rule_metrics', JSON.stringify(ruleMetrics));
+        localStorage.setItem(kRuleMetrics, JSON.stringify(ruleMetrics));
       } else {
-        localStorage.removeItem('screening_active_rule_metrics');
+        localStorage.removeItem(kRuleMetrics);
       }
     } catch {}
-  }, [ruleMetrics, editingVersion]);
+  }, [ruleMetrics, editingVersion, kRuleMetrics]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('screening_active_sector_limits', JSON.stringify(sectorLimits));
+      localStorage.setItem(kSectorLimits, JSON.stringify(sectorLimits));
     } catch {}
-  }, [sectorLimits]);
+  }, [sectorLimits, kSectorLimits]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('screening_active_countries', JSON.stringify(countries));
+      localStorage.setItem(kCountries, JSON.stringify(countries));
     } catch {}
-  }, [countries]);
+  }, [countries, kCountries]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('screening_active_exchanges', JSON.stringify(exchanges));
+      localStorage.setItem(kExchanges, JSON.stringify(exchanges));
     } catch {}
-  }, [exchanges]);
+  }, [exchanges, kExchanges]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('screening_active_sectors', JSON.stringify(sectors));
+      localStorage.setItem(kSectors, JSON.stringify(sectors));
     } catch {}
-  }, [sectors]);
+  }, [sectors, kSectors]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('screening_active_diversification', JSON.stringify(diversification));
+      localStorage.setItem(kDiversification, JSON.stringify(diversification));
     } catch {}
-  }, [diversification]);
+  }, [diversification, kDiversification]);
 
   // Load authoritative profiles from PostgreSQL backend on mount, safely merging with local storage
   useEffect(() => {
@@ -838,10 +878,10 @@ export const ScreeningProvider = ({ children }) => {
 
     async function loadBackendProfiles() {
       try {
-        // Step 1: Read whatever is currently in local storage
+        // Step 1: Read whatever is currently in user-scoped local storage
         let localProfiles = [];
         try {
-          const cachedProfilesStr = localStorage.getItem('screening_profiles_cache');
+          const cachedProfilesStr = localStorage.getItem(kProfilesCache);
           if (cachedProfilesStr) {
             const parsed = JSON.parse(cachedProfilesStr);
             if (Array.isArray(parsed)) {
@@ -854,7 +894,7 @@ export const ScreeningProvider = ({ children }) => {
 
         let localHistory = [];
         try {
-          const cachedHistoryStr = localStorage.getItem('screening_history_cache');
+          const cachedHistoryStr = localStorage.getItem(kHistoryCache);
           if (cachedHistoryStr) {
             const parsed = JSON.parse(cachedHistoryStr);
             if (Array.isArray(parsed)) {
@@ -865,7 +905,7 @@ export const ScreeningProvider = ({ children }) => {
           }
         } catch {}
 
-        // Step 2: Query PostgreSQL backend
+        // Step 2: Query PostgreSQL backend for current authenticated user
         const backendProfiles = await fetchProfilesApi();
         if (!isMounted) return;
 
@@ -874,22 +914,11 @@ export const ScreeningProvider = ({ children }) => {
             (bp) => bp && bp.profile_name && bp.version_id !== '1' && bp.version_id !== '2'
           );
 
-          const { parsedProfiles, parsedHistory } = mapBackendProfilesToFrontend(realBackendProfiles);
+          const { parsedProfiles, parsedHistory } = mapBackendProfilesToFrontend(realBackendProfiles, userInitials);
 
-          // Build index of backend IDs and profile keys
-          const backendIds = new Set(parsedProfiles.map((p) => p.id));
-          const backendProfileKeys = new Set(parsedProfiles.map((p) => p.profileKey));
-
-          // Keep any locally created profiles that are not yet in backend
-          const unsyncedProfiles = localProfiles.filter(
-            (lp) => !backendIds.has(lp.id) && !backendProfileKeys.has(lp.profileKey)
-          );
-          const unsyncedHistory = localHistory.filter(
-            (lh) => !backendIds.has(lh.id)
-          );
-
-          const combinedProfiles = [...parsedProfiles, ...unsyncedProfiles];
-          const combinedHistory = [...parsedHistory, ...unsyncedHistory];
+          // Backend is the single authoritative source of truth for this user
+          const combinedProfiles = parsedProfiles;
+          const combinedHistory = parsedHistory;
 
           if (combinedProfiles.length > 0 && !combinedProfiles.some((p) => p.badge === 'Active')) {
             combinedProfiles[0].badge = 'Active';
@@ -899,60 +928,21 @@ export const ScreeningProvider = ({ children }) => {
           setVersionHistory(combinedHistory);
 
           try {
-            localStorage.setItem('screening_profiles_cache', JSON.stringify(combinedProfiles));
-            localStorage.setItem('screening_history_cache', JSON.stringify(combinedHistory));
+            localStorage.setItem(kProfilesCache, JSON.stringify(combinedProfiles));
+            localStorage.setItem(kHistoryCache, JSON.stringify(combinedHistory));
           } catch {}
 
           const active = combinedProfiles.find((p) => p.badge === 'Active') || combinedProfiles[0];
           if (active) {
             setSelectedProfileName(`${active.name} - Version ${active.versionNumber}`);
-          }
-
-          // Step 3: Background auto-sync unsynced local profiles to backend if backend is available
-          if (unsyncedProfiles.length > 0) {
-            for (const unsynced of unsyncedProfiles) {
-              try {
-                const sectorLimitsMap = {};
-                (unsynced.snapshot?.sectorLimits || []).forEach((item) => {
-                  if (item.limit !== '' && !isNaN(parseFloat(item.limit))) {
-                    sectorLimitsMap[item.sector] = parseFloat(item.limit);
-                  }
-                });
-
-                const activeRules = (unsynced.snapshot?.metrics || [])
-                  .filter((m) => m.mode !== 'Off' && m.value !== '' && parseProfileRuleValue(m.value) !== null)
-                  .map((m) => ({
-                    id: CANONICAL_METRIC_IDS[m.name] || m.name.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
-                    name: m.name,
-                    category: m.category || 'Valuation',
-                    mode: m.mode || 'Both',
-                    condition: m.condition || '>=',
-                    value: parseProfileRuleValue(m.value) || 0.0,
-                    value_display: `${m.condition || ''} ${m.value || ''}`.trim(),
-                    weight: m.mode === 'Off' || m.mode === 'Req.' ? 0.0 : (parseFloat(m.weight) || 0.0),
-                  }));
-
-                await createProfileApi({
-                  profile_name: unsynced.name,
-                  version_number: String(unsynced.versionNumber || 1),
-                  description: unsynced.description || `Saved screening rules (Version ${unsynced.versionNumber || 1})`,
-                  is_active: unsynced.badge === 'Active',
-                  sector_limits: sectorLimitsMap,
-                  diversification_rules: {
-                    ...unsynced.snapshot?.diversification,
-                    snapshot: unsynced.snapshot,
-                  },
-                  changes: unsynced.changes || [],
-                  rules: activeRules,
-                });
-              } catch (syncErr) {
-                console.warn('[ScreeningContext] Could not auto-sync local profile to backend:', unsynced.name, syncErr);
-              }
+            if (active.snapshot) {
+              loadConfiguration(active.snapshot, false);
             }
+          } else {
+            setSelectedProfileName('No active profile');
           }
         } else {
-          // Backend is offline or returned null/error
-          // Guarantee that local profiles and history are NEVER wiped!
+          // Backend offline or error: fallback to local cache
           if (localProfiles.length > 0) {
             setProfiles(localProfiles);
             setVersionHistory(localHistory);
@@ -973,7 +963,7 @@ export const ScreeningProvider = ({ children }) => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [userEmail]);
 
   useEffect(() => {
     if (filterSector !== 'All' && !selectedSectorNames.includes(filterSector)) {
@@ -1223,12 +1213,12 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
     setDiversification(div);
 
     try {
-      localStorage.setItem('screening_active_rule_metrics', JSON.stringify(metrics));
-      localStorage.setItem('screening_active_sector_limits', JSON.stringify(limits));
-      localStorage.setItem('screening_active_countries', JSON.stringify(c));
-      localStorage.setItem('screening_active_exchanges', JSON.stringify(ex));
-      localStorage.setItem('screening_active_sectors', JSON.stringify(sec));
-      localStorage.setItem('screening_active_diversification', JSON.stringify(div));
+      localStorage.setItem(kRuleMetrics, JSON.stringify(metrics));
+      localStorage.setItem(kSectorLimits, JSON.stringify(limits));
+      localStorage.setItem(kCountries, JSON.stringify(c));
+      localStorage.setItem(kExchanges, JSON.stringify(ex));
+      localStorage.setItem(kSectors, JSON.stringify(sec));
+      localStorage.setItem(kDiversification, JSON.stringify(div));
     } catch {}
 
     if (navigateToCatalog) {
@@ -1251,7 +1241,7 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
           badge: profile.id === id ? 'Active' : profile.badge === 'Active' ? 'Saved' : profile.badge,
         }));
         try {
-          localStorage.setItem('screening_profiles_cache', JSON.stringify(updated));
+          localStorage.setItem(kProfilesCache, JSON.stringify(updated));
         } catch {}
         return updated;
       });
@@ -1264,7 +1254,7 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
             item.versionNumber === target.versionNumber,
         }));
         try {
-          localStorage.setItem('screening_history_cache', JSON.stringify(updated));
+          localStorage.setItem(kHistoryCache, JSON.stringify(updated));
         } catch {}
         return updated;
       });
@@ -1297,7 +1287,7 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
                 : profile.badge,
         }));
         try {
-          localStorage.setItem('screening_profiles_cache', JSON.stringify(updated));
+          localStorage.setItem(kProfilesCache, JSON.stringify(updated));
         } catch {}
         return updated;
       });
@@ -1307,7 +1297,7 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
           isCurrent: v.id === version || v.version === version,
         }));
         try {
-          localStorage.setItem('screening_history_cache', JSON.stringify(updated));
+          localStorage.setItem(kHistoryCache, JSON.stringify(updated));
         } catch {}
         return updated;
       });
@@ -1532,7 +1522,7 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
         month: 'short',
         year: 'numeric',
       }),
-      by: 'PM',
+      by: user?.fullName ? user.fullName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : (userEmail !== 'guest' ? userEmail.slice(0, 2).toUpperCase() : 'AN'),
       name: trimmedName,
       editedFromVersion,
       changeSummary: changeSummaryText,
@@ -1558,7 +1548,7 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
     setVersionHistory((prev) => {
       const updated = [newHistoryItem, ...prev.map((item) => ({ ...item, isCurrent: false }))];
       try {
-        localStorage.setItem('screening_history_cache', JSON.stringify(updated));
+        localStorage.setItem(kHistoryCache, JSON.stringify(updated));
       } catch {}
       return updated;
     });
@@ -1574,7 +1564,7 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
         })),
       ];
       try {
-        localStorage.setItem('screening_profiles_cache', JSON.stringify(updated));
+        localStorage.setItem(kProfilesCache, JSON.stringify(updated));
       } catch {}
       return updated;
     });
@@ -1609,7 +1599,7 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
     }));
     setVersionHistory(updatedHistory);
     try {
-      localStorage.setItem('screening_history_cache', JSON.stringify(updatedHistory));
+      localStorage.setItem(kHistoryCache, JSON.stringify(updatedHistory));
     } catch {}
 
     setProfiles((prev) => {
@@ -1628,7 +1618,7 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
         ));
       }
       try {
-        localStorage.setItem('screening_profiles_cache', JSON.stringify(updatedProfiles));
+        localStorage.setItem(kProfilesCache, JSON.stringify(updatedProfiles));
       } catch {}
       return updatedProfiles;
     });
@@ -1667,12 +1657,12 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
     setEditingVersion(null);
 
     try {
-      localStorage.removeItem('screening_active_rule_metrics');
-      localStorage.removeItem('screening_active_sector_limits');
-      localStorage.removeItem('screening_active_countries');
-      localStorage.removeItem('screening_active_exchanges');
-      localStorage.removeItem('screening_active_sectors');
-      localStorage.removeItem('screening_active_diversification');
+      localStorage.removeItem(kRuleMetrics);
+      localStorage.removeItem(kSectorLimits);
+      localStorage.removeItem(kCountries);
+      localStorage.removeItem(kExchanges);
+      localStorage.removeItem(kSectors);
+      localStorage.removeItem(kDiversification);
     } catch {}
   };
 

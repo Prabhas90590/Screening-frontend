@@ -35,6 +35,8 @@ class RuleVersionRecord(BaseModel):
     diversification_rules: Dict[str, Any] = Field(default_factory=dict, description="Cap rules")
     changes: List[str] = Field(default_factory=list, description="Diff comparison from previous version")
     selected_countries: List[str] = Field(default_factory=list, description="Selected country names")
+    owner_email: Optional[str] = Field(default=None, description="User email owning this profile")
+    user_id: Optional[str] = Field(default=None, description="User UUID owning this profile")
     rules: List[RuleRecord] = Field(default_factory=list, description="Rules inside this profile")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

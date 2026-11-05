@@ -15,6 +15,7 @@ from app.models.screening_run import (
     ScreeningResultRecord,
     ScreeningRunRecord,
 )
+from app.models.user import UserRecord  # Phase 1 – authentication
 
 __all__ = [
     "CompanyRecord",
@@ -30,4 +31,5 @@ __all__ = [
     "FunnelCountRecord",
     "DecisionRecord",
     "HoldingRecord",
+    "UserRecord",  # Phase 1 – authentication
 ]

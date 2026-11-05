@@ -32,6 +32,8 @@ class ScheduleConfigSchema(BaseModel):
     )
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
+    owner_email: Optional[str] = None
+    user_id: Optional[str] = None
     updated_at: Optional[datetime] = None
 
     @field_validator("time_of_day")

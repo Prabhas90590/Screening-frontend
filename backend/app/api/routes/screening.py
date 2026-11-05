@@ -2,16 +2,18 @@
 
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.logging import DiagnosticLogger
 from app.models.screening_run import ScreeningRunRecord
+from app.models.user import UserRecord
 from app.repositories.screening_repository import screening_repository
 from app.schemas.screening import (
     FunnelStageCounts,
     ScreeningRunRequest,
     ScreeningRunResponse,
 )
+from app.services.auth_service import get_optional_user
 from app.services.screening_service import screening_service
 
 logger = DiagnosticLogger("screening_api")
@@ -19,20 +21,34 @@ router = APIRouter(prefix="/api/screenings", tags=["screenings"])
 
 
 @router.post("", response_model=ScreeningRunResponse, status_code=status.HTTP_201_CREATED)
-async def trigger_screening_run(request: ScreeningRunRequest):
+async def trigger_screening_run(
+    request: ScreeningRunRequest,
+    current_user: Optional[UserRecord] = Depends(get_optional_user),
+):
     """Initiate a screening execution for selected countries, exchanges, and rules."""
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to run screening."
+        )
+    user_email = current_user.email
     logger.calc_info(
         "API",
         "POST",
-        f"Incoming screening request: {len(request.countries)} countries, {len(request.exchanges)} exchanges"
+        f"Incoming screening request from {user_email}: {len(request.countries or [])} countries, {len(request.exchanges or [])} exchanges"
     )
-    return await screening_service.initiate_screening_run(request)
+    return await screening_service.initiate_screening_run(request, owner_email=user_email)
 
 
 @router.get("", response_model=List[ScreeningRunRecord])
-def list_screening_runs(limit: int = Query(default=20, ge=1, le=100)):
-    """List historical screening run executions ordered by start time descending."""
-    return screening_service.list_runs(limit=limit)
+def list_screening_runs(
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: Optional[UserRecord] = Depends(get_optional_user),
+):
+    """List historical screening run executions ordered by start time descending for current user."""
+    if not current_user:
+        return []
+    return screening_service.list_runs(limit=limit, owner_email=current_user.email)
 
 
 @router.get("/{run_id}", response_model=ScreeningRunRecord)

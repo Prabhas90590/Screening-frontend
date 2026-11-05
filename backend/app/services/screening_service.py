@@ -107,22 +107,32 @@ class ScreeningService:
 
         return clean_countries, clean_exchanges
 
-    async def initiate_screening_run(self, request: ScreeningRunRequest) -> ScreeningRunResponse:
+    async def initiate_screening_run(
+        self, request: ScreeningRunRequest, owner_email: Optional[str] = None
+    ) -> ScreeningRunResponse:
         """Validate screening request, resolve rules, ingest market data, and record the screening run."""
         start_time = time.perf_counter()
         now = datetime.now(timezone.utc)
+        target_owner = owner_email
+        if not target_owner:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required to run screening.",
+            )
 
         # 1. Resolve Rule Profile
         active_version = None
         if request.rule_version_id:
-            active_version = self.rule_repo.get_version_by_id(request.rule_version_id)
+            active_version = self.rule_repo.get_version_by_id(request.rule_version_id, owner_email=target_owner)
+            if not active_version:
+                active_version = self.rule_repo.get_version_by_id(request.rule_version_id)
             if not active_version:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Rule profile '{request.rule_version_id}' not found in database.",
                 )
         elif not request.rules_config:
-            active_version = self.rule_repo.get_active_version()
+            active_version = self.rule_repo.get_active_version(owner_email=target_owner)
 
         if active_version:
             v_num = getattr(active_version, "version_number", None) or "1.0"
@@ -205,6 +215,7 @@ class ScreeningService:
             completed_at=None,
             trigger_type=getattr(request, "trigger_type", "instant") or "instant",
             notification_email=target_email,
+            owner_email=target_owner,
         )
         self.screening_repo.save_run(run_record)
 
@@ -688,9 +699,9 @@ class ScreeningService:
         """Fetch a specific screening run by its ID."""
         return self.screening_repo.get_run(run_id)
 
-    def list_runs(self, limit: int = 50) -> List[ScreeningRunRecord]:
-        """Fetch historical screening executions."""
-        return self.screening_repo.list_runs(limit)
+    def list_runs(self, limit: int = 50, owner_email: Optional[str] = None) -> List[ScreeningRunRecord]:
+        """Fetch historical screening executions scoped to owner."""
+        return self.screening_repo.list_runs(limit=limit, owner_email=owner_email)
 
 
 # Global screening service instance

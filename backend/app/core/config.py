@@ -50,6 +50,11 @@ class Settings:
     )
     debug: bool = _get_bool("DEBUG", True)
 
+    # Auth settings (Phase 2 – user-side login)
+    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "INSECURE_FALLBACK_DO_NOT_USE_IN_PRODUCTION")
+    session_idle_limit: int = int(os.getenv("SESSION_IDLE_LIMIT", "1800"))
+    access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+
     # Email & SMTP notification settings
     email_notifications_enabled: bool = _get_bool("EMAIL_NOTIFICATIONS_ENABLED", True)
     smtp_host: str = os.getenv("SMTP_HOST", "smtp.office365.com")

@@ -101,21 +101,32 @@ class DecisionService:
 
         return canonical_id.replace("comp-", "").replace("-", " ").title()
 
-    def _compute_decision_id(self, canonical_id: str, profile_name: Optional[str], run_id: Optional[str]) -> str:
-        """Generate consistent decision ID so updating the same profile/company replaces the record."""
+    def _compute_decision_id(
+        self,
+        canonical_id: str,
+        profile_name: Optional[str],
+        run_id: Optional[str],
+        owner_email: Optional[str] = None,
+    ) -> str:
+        """Generate consistent decision ID scoped to user so different analysts never overwrite each other."""
+        owner = owner_email or "analyst"
+        user_slug = self._clean_slug(owner.split('@')[0])
         if profile_name and profile_name.strip():
             slug = self._clean_slug(profile_name)
-            return f"dec-{slug}-{canonical_id}"
+            return f"dec-{user_slug}-{slug}-{canonical_id}"
         if run_id and run_id.strip():
-            return f"dec-{run_id.strip()}-{canonical_id}"
-        return f"dec-{canonical_id}"
+            return f"dec-{user_slug}-{run_id.strip()}-{canonical_id}"
+        return f"dec-{user_slug}-{canonical_id}"
 
-    def record_decision(self, req: DecisionUpdateRequest) -> DecisionResponse:
+    def record_decision(
+        self, req: DecisionUpdateRequest, owner_email: Optional[str] = None
+    ) -> DecisionResponse:
         """Create or update an analyst decision for a security."""
         now = datetime.utcnow()
+        target_owner = owner_email or req.owner_email or "analyst"
         canonical_id = self._resolve_canonical_company_id(req.canonical_company_id)
         comp_name = self._resolve_company_name(canonical_id, req.company_name)
-        dec_id = self._compute_decision_id(canonical_id, req.profile_name, req.run_id)
+        dec_id = self._compute_decision_id(canonical_id, req.profile_name, req.run_id, owner_email=target_owner)
 
         dec_record = DecisionRecord(
             decision_id=dec_id,
@@ -127,13 +138,14 @@ class DecisionService:
             decision_note=req.decision_note,
             run_id=req.run_id,
             decided_by=getattr(req, "decided_by", "Analyst") or "Analyst",
+            owner_email=target_owner,
             created_at=now,
             updated_at=now,
         )
 
         self.repo.save_decision(dec_record)
         logger.info(
-            f"[DecisionService] Saved decision for {comp_name} ({canonical_id}) under profile '{req.profile_name}': {req.decision.upper()}"
+            f"[DecisionService] Saved decision for {comp_name} ({canonical_id}) under profile '{req.profile_name}' for {target_owner}: {req.decision.upper()}"
         )
 
         return DecisionResponse(
@@ -146,12 +158,16 @@ class DecisionService:
             decision_note=dec_record.decision_note,
             run_id=dec_record.run_id,
             decided_by=dec_record.decided_by,
+            owner_email=dec_record.owner_email,
             updated_at=dec_record.updated_at,
         )
 
-    def bulk_sync_decisions(self, bulk_req: DecisionBulkSyncRequest) -> List[DecisionResponse]:
+    def bulk_sync_decisions(
+        self, bulk_req: DecisionBulkSyncRequest, owner_email: Optional[str] = None
+    ) -> List[DecisionResponse]:
         """Bulk upsert all Keep/Drop decisions when user exports results for a profile."""
         now = datetime.utcnow()
+        target_owner = owner_email or bulk_req.owner_email or "analyst"
         records_to_save: List[DecisionRecord] = []
         responses: List[DecisionResponse] = []
 
@@ -163,7 +179,7 @@ class DecisionService:
             prof_name = item.profile_name or bulk_req.profile_name
             r_id = item.run_id or bulk_req.run_id
 
-            dec_id = self._compute_decision_id(canonical_id, prof_name, r_id)
+            dec_id = self._compute_decision_id(canonical_id, prof_name, r_id, owner_email=target_owner)
 
             rec = DecisionRecord(
                 decision_id=dec_id,
@@ -175,6 +191,7 @@ class DecisionService:
                 decision_note=item.decision_note,
                 run_id=r_id,
                 decided_by=item.decided_by or "Analyst",
+                owner_email=target_owner,
                 created_at=now,
                 updated_at=now,
             )
@@ -190,6 +207,7 @@ class DecisionService:
                     decision_note=rec.decision_note,
                     run_id=rec.run_id,
                     decided_by=rec.decided_by,
+                    owner_email=rec.owner_email,
                     updated_at=rec.updated_at,
                 )
             )
@@ -197,15 +215,20 @@ class DecisionService:
         if records_to_save:
             self.repo.save_decisions_batch(records_to_save)
             logger.info(
-                f"[DecisionService] Bulk-synced {len(records_to_save)} decisions for profile '{bulk_req.profile_name}'"
+                f"[DecisionService] Bulk-synced {len(records_to_save)} decisions for profile '{bulk_req.profile_name}' ({target_owner})"
             )
 
         return responses
 
-    def get_decision(self, canonical_company_id: str, profile_name: Optional[str] = None) -> Optional[DecisionResponse]:
+    def get_decision(
+        self,
+        canonical_company_id: str,
+        profile_name: Optional[str] = None,
+        owner_email: Optional[str] = None,
+    ) -> Optional[DecisionResponse]:
         """Fetch the most recent decision for a security."""
         canonical_id = self._resolve_canonical_company_id(canonical_company_id)
-        rec = self.repo.get_decision(canonical_id, profile_name=profile_name)
+        rec = self.repo.get_decision(canonical_id, profile_name=profile_name, owner_email=owner_email)
         if not rec:
             return None
         return DecisionResponse(
@@ -218,14 +241,18 @@ class DecisionService:
             decision_note=rec.decision_note,
             run_id=rec.run_id,
             decided_by=rec.decided_by,
+            owner_email=rec.owner_email,
             updated_at=rec.updated_at,
         )
 
     def list_decisions(
-        self, profile_name: Optional[str] = None, run_id: Optional[str] = None
+        self,
+        profile_name: Optional[str] = None,
+        run_id: Optional[str] = None,
+        owner_email: Optional[str] = None,
     ) -> List[DecisionResponse]:
-        """Fetch decisions, optionally filtered by profile_name or run_id."""
-        records = self.repo.list_decisions(profile_name=profile_name, run_id=run_id)
+        """Fetch decisions, optionally filtered by profile_name, run_id, or owner_email."""
+        records = self.repo.list_decisions(profile_name=profile_name, run_id=run_id, owner_email=owner_email)
 
         return [
             DecisionResponse(
@@ -238,6 +265,7 @@ class DecisionService:
                 decision_note=r.decision_note,
                 run_id=r.run_id,
                 decided_by=r.decided_by,
+                owner_email=r.owner_email,
                 updated_at=r.updated_at,
             )
             for r in records

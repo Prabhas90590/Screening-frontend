@@ -9,11 +9,13 @@ import logging
 from typing import List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.logging import DiagnosticLogger
 from app.models.rule import RuleRecord, RuleVersionRecord
+from app.models.user import UserRecord
 from app.repositories.rule_repository import rule_repository
+from app.services.auth_service import get_optional_user
 from app.schemas.rule import (
     CreateProfileRequest,
     MetricCatalogSpecification,
@@ -52,6 +54,7 @@ def _record_to_schema(version: RuleVersionRecord) -> RuleProfileSchema:
         diversification_rules=version.diversification_rules,
         changes=version.changes or [],
         selected_countries=version.selected_countries or [],
+        owner_email=version.owner_email,
         rules=rule_items,
         created_at=version.created_at,
         updated_at=version.updated_at,
@@ -65,16 +68,23 @@ def get_rule_catalog():
 
 
 @router.get("/profiles", response_model=List[RuleProfileSchema])
-def list_profiles():
-    """Retrieve all saved screening strategy profiles from PostgreSQL."""
-    versions = rule_repository.list_versions()
+def list_profiles(current_user: Optional[UserRecord] = Depends(get_optional_user)):
+    """Retrieve all saved screening strategy profiles for the current user from PostgreSQL."""
+    if not current_user:
+        return []
+    versions = rule_repository.list_versions(owner_email=current_user.email, user_id=current_user.id)
     return [_record_to_schema(v) for v in versions]
 
 
 @router.get("/profiles/active", response_model=RuleProfileSchema)
-def get_active_profile():
-    """Retrieve the currently active screening profile."""
-    active = rule_repository.get_active_version()
+def get_active_profile(current_user: Optional[UserRecord] = Depends(get_optional_user)):
+    """Retrieve the currently active screening profile for the current user."""
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required."
+        )
+    active = rule_repository.get_active_version(owner_email=current_user.email, user_id=current_user.id)
     if not active:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -84,9 +94,13 @@ def get_active_profile():
 
 
 @router.get("/profiles/{version_id}", response_model=RuleProfileSchema)
-def get_profile(version_id: str):
+def get_profile(version_id: str, current_user: Optional[UserRecord] = Depends(get_optional_user)):
     """Retrieve a specific profile by its version ID."""
-    version = rule_repository.get_version_by_id(version_id)
+    user_email = current_user.email if current_user else None
+    user_id = current_user.id if current_user else None
+    version = rule_repository.get_version_by_id(version_id, owner_email=user_email, user_id=user_id)
+    if not version and not current_user:
+        version = rule_repository.get_version_by_id(version_id)
     if not version:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -96,14 +110,24 @@ def get_profile(version_id: str):
 
 
 @router.post("/profiles", response_model=RuleProfileSchema, status_code=status.HTTP_201_CREATED)
-def create_profile(request: CreateProfileRequest):
+def create_profile(
+    request: CreateProfileRequest,
+    current_user: Optional[UserRecord] = Depends(get_optional_user),
+):
     """Create a new rule strategy profile in PostgreSQL."""
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to create a profile."
+        )
+    user_email = current_user.email
+    user_id = current_user.id
     now = datetime.now(timezone.utc)
     version_id = f"prof-{uuid4().hex[:8]}"
 
     changes = list(request.changes or [])
     if not changes:
-        all_versions = rule_repository.list_versions()
+        all_versions = rule_repository.list_versions(owner_email=user_email, user_id=user_id)
         matching_prev = [v for v in all_versions if v.profile_name.lower().strip() == request.profile_name.lower().strip()]
         if matching_prev:
             prev_ver = matching_prev[0]
@@ -154,6 +178,8 @@ def create_profile(request: CreateProfileRequest):
         diversification_rules=request.diversification_rules,
         changes=changes,
         selected_countries=request.selected_countries or [],
+        owner_email=user_email,
+        user_id=user_id,
         created_at=now,
         updated_at=now,
     )
@@ -197,18 +223,29 @@ def create_profile(request: CreateProfileRequest):
                 )
             )
 
-    saved_version = rule_repository.get_version_by_id(version_id)
+    saved_version = rule_repository.get_version_by_id(version_id, owner_email=user_email)
     if not saved_version:
         raise HTTPException(status_code=500, detail="Failed to retrieve created profile.")
 
-    logger.rule_info("CREATE", request.profile_name, f"Created new rule profile '{version_id}'")
+    logger.rule_info("CREATE", request.profile_name, f"Created new rule profile '{version_id}' for {user_email}")
     return _record_to_schema(saved_version)
 
 
 @router.put("/profiles/{version_id}", response_model=RuleProfileSchema)
-def update_profile(version_id: str, request: UpdateProfileRequest):
+def update_profile(
+    version_id: str,
+    request: UpdateProfileRequest,
+    current_user: Optional[UserRecord] = Depends(get_optional_user),
+):
     """Update thresholds, weights, and limits of an existing profile."""
-    existing = rule_repository.get_version_by_id(version_id)
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to update a profile."
+        )
+    user_email = current_user.email
+    user_id = current_user.id
+    existing = rule_repository.get_version_by_id(version_id, owner_email=user_email, user_id=user_id)
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -226,6 +263,8 @@ def update_profile(version_id: str, request: UpdateProfileRequest):
         diversification_rules=request.diversification_rules if request.diversification_rules is not None else existing.diversification_rules,
         changes=request.changes if request.changes is not None else existing.changes,
         selected_countries=request.selected_countries if request.selected_countries is not None else existing.selected_countries,
+        owner_email=existing.owner_email or user_email,
+        user_id=existing.user_id or user_id,
         created_at=existing.created_at,
         updated_at=now,
     )
@@ -251,7 +290,7 @@ def update_profile(version_id: str, request: UpdateProfileRequest):
                 )
             )
 
-    saved = rule_repository.get_version_by_id(version_id)
+    saved = rule_repository.get_version_by_id(version_id, owner_email=user_email, user_id=user_id)
     if not saved:
         raise HTTPException(status_code=500, detail="Failed to retrieve updated profile.")
 
@@ -260,34 +299,54 @@ def update_profile(version_id: str, request: UpdateProfileRequest):
 
 
 @router.put("/profiles/{version_id}/activate", response_model=RuleProfileSchema)
-def activate_profile(version_id: str):
-    """Set a strategy profile as active and deactivate all other profiles."""
-    existing = rule_repository.get_version_by_id(version_id)
+def activate_profile(
+    version_id: str,
+    current_user: Optional[UserRecord] = Depends(get_optional_user),
+):
+    """Set a strategy profile as active and deactivate all other profiles for the user."""
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to activate a profile."
+        )
+    user_email = current_user.email
+    user_id = current_user.id
+    existing = rule_repository.get_version_by_id(version_id, owner_email=user_email, user_id=user_id)
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Profile '{version_id}' not found."
         )
 
-    rule_repository.activate_version(version_id)
-    updated = rule_repository.get_version_by_id(version_id)
+    rule_repository.activate_version(version_id, owner_email=user_email)
+    updated = rule_repository.get_version_by_id(version_id, owner_email=user_email, user_id=user_id)
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to activate profile.")
 
-    logger.rule_info("ACTIVATE", updated.profile_name, f"Activated rule profile '{version_id}'")
+    logger.rule_info("ACTIVATE", updated.profile_name, f"Activated rule profile '{version_id}' for {user_email}")
     return _record_to_schema(updated)
 
 
 @router.delete("/profiles/{version_id}", status_code=status.HTTP_200_OK)
-def delete_profile(version_id: str):
+def delete_profile(
+    version_id: str,
+    current_user: Optional[UserRecord] = Depends(get_optional_user),
+):
     """Delete a profile and all its criteria from PostgreSQL."""
-    existing = rule_repository.get_version_by_id(version_id)
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to delete a profile."
+        )
+    user_email = current_user.email
+    user_id = current_user.id
+    existing = rule_repository.get_version_by_id(version_id, owner_email=user_email, user_id=user_id)
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Profile '{version_id}' not found."
         )
 
-    rule_repository.delete_version(version_id)
+    rule_repository.delete_version(version_id, owner_email=user_email)
     logger.rule_info("DELETE", existing.profile_name, f"Deleted profile '{version_id}'")
     return {"status": "deleted", "version_id": version_id, "profile_name": existing.profile_name}

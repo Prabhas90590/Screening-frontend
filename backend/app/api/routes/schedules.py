@@ -1,10 +1,12 @@
 """Schedule management and triggering API routes (Phase 17)."""
 
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.logging import DiagnosticLogger
+from app.models.user import UserRecord
 from app.schemas.schedule import ScheduleConfigSchema, ScheduleResponse
+from app.services.auth_service import get_optional_user
 from app.services.scheduler_service import scheduler_service
 
 logger = DiagnosticLogger("schedules_api")
@@ -37,8 +39,13 @@ def get_schedules(cadence: Optional[str] = Query(default=None)):
 
 
 @router.post("", response_model=ScheduleResponse)
-def save_schedule(payload: ScheduleConfigSchema):
+def save_schedule(
+    payload: ScheduleConfigSchema,
+    current_user: Optional[UserRecord] = Depends(get_optional_user),
+):
     """Save or update screening schedule configuration."""
+    if current_user and current_user.email:
+        payload.owner_email = current_user.email
     try:
         updated = scheduler_service.save_schedule(payload)
         schedules = scheduler_service.list_schedules()

@@ -34,9 +34,9 @@ class ScreeningRepository:
             INSERT INTO screening_runs (
                 run_id, status, provider, rule_version_id, profile_name,
                 display_currency, selected_countries, selected_exchanges,
-                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type, notification_email
+                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type, notification_email, owner_email
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (run_id) DO UPDATE SET
                 status = EXCLUDED.status,
@@ -44,20 +44,22 @@ class ScreeningRepository:
                 duration_ms = EXCLUDED.duration_ms,
                 error_message = EXCLUDED.error_message,
                 trigger_type = EXCLUDED.trigger_type,
-                notification_email = EXCLUDED.notification_email;
+                notification_email = EXCLUDED.notification_email,
+                owner_email = COALESCE(EXCLUDED.owner_email, screening_runs.owner_email);
         """ if is_postgres else """
             INSERT INTO screening_runs (
                 run_id, status, provider, rule_version_id, profile_name,
                 display_currency, selected_countries, selected_exchanges,
-                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type, notification_email
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type, notification_email, owner_email
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (run_id) DO UPDATE SET
                 status = excluded.status,
                 completed_at = excluded.completed_at,
                 duration_ms = excluded.duration_ms,
                 error_message = excluded.error_message,
                 trigger_type = excluded.trigger_type,
-                notification_email = excluded.notification_email;
+                notification_email = excluded.notification_email,
+                owner_email = COALESCE(excluded.owner_email, screening_runs.owner_email);
         """
 
         countries_json = json.dumps(run.selected_countries)
@@ -85,8 +87,8 @@ class ScreeningRepository:
             run.error_message,
             run.trigger_type or "instant",
             run.notification_email,
+            run.owner_email,
         )
-
 
         try:
             cursor = conn.cursor()
@@ -113,7 +115,8 @@ class ScreeningRepository:
                 COALESCE(f.universe_count, 0) as universe_count,
                 COALESCE(f.selected_count, 0) as selected_count,
                 COALESCE(r.trigger_type, 'instant') as trigger_type,
-                r.notification_email
+                r.notification_email,
+                r.owner_email
             FROM screening_runs r
             LEFT JOIN funnel_counts f ON r.run_id = f.run_id
             WHERE r.run_id = %s
@@ -126,7 +129,8 @@ class ScreeningRepository:
                 COALESCE(f.universe_count, 0) as universe_count,
                 COALESCE(f.selected_count, 0) as selected_count,
                 COALESCE(r.trigger_type, 'instant') as trigger_type,
-                r.notification_email
+                r.notification_email,
+                r.owner_email
             FROM screening_runs r
             LEFT JOIN funnel_counts f ON r.run_id = f.run_id
             WHERE r.run_id = ?
@@ -144,45 +148,38 @@ class ScreeningRepository:
         finally:
             conn.close()
 
-    def list_runs(self, limit: int = 50) -> List[ScreeningRunRecord]:
+    def list_runs(self, limit: int = 50, owner_email: Optional[str] = None) -> List[ScreeningRunRecord]:
         """List historical screening runs ordered by start time descending."""
+        if not owner_email:
+            return []
+
         conn = db_manager.get_connection()
         is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-        query = """
-            SELECT 
-                r.run_id, r.status, r.provider, r.rule_version_id, r.profile_name,
-                r.display_currency, r.selected_countries, r.selected_exchanges,
-                r.rules_snapshot, r.duration_ms, r.started_at, r.completed_at,
-                r.error_message,
-                COALESCE(f.universe_count, 0) as universe_count,
-                COALESCE(f.selected_count, 0) as selected_count,
-                COALESCE(r.trigger_type, 'instant') as trigger_type,
-                r.notification_email
-            FROM screening_runs r
-            LEFT JOIN funnel_counts f ON r.run_id = f.run_id
-            ORDER BY r.started_at DESC
-            LIMIT %s
-        """ if is_postgres else """
-            SELECT 
-                r.run_id, r.status, r.provider, r.rule_version_id, r.profile_name,
-                r.display_currency, r.selected_countries, r.selected_exchanges,
-                r.rules_snapshot, r.duration_ms, r.started_at, r.completed_at,
-                r.error_message,
-                COALESCE(f.universe_count, 0) as universe_count,
-                COALESCE(f.selected_count, 0) as selected_count,
-                COALESCE(r.trigger_type, 'instant') as trigger_type,
-                r.notification_email
-            FROM screening_runs r
-            LEFT JOIN funnel_counts f ON r.run_id = f.run_id
-            ORDER BY r.started_at DESC
-            LIMIT ?
-        """
 
-        # De-duplicate by id to avoid PostgreSQL CardinalityViolation
+        where_clause = "WHERE LOWER(r.owner_email) = LOWER(%s)" if is_postgres else "WHERE LOWER(r.owner_email) = LOWER(?)"
+        params: list = [owner_email, limit]
+
+        query = f"""
+            SELECT 
+                r.run_id, r.status, r.provider, r.rule_version_id, r.profile_name,
+                r.display_currency, r.selected_countries, r.selected_exchanges,
+                r.rules_snapshot, r.duration_ms, r.started_at, r.completed_at,
+                r.error_message,
+                COALESCE(f.universe_count, 0) as universe_count,
+                COALESCE(f.selected_count, 0) as selected_count,
+                COALESCE(r.trigger_type, 'instant') as trigger_type,
+                r.notification_email,
+                r.owner_email
+            FROM screening_runs r
+            LEFT JOIN funnel_counts f ON r.run_id = f.run_id
+            {where_clause}
+            ORDER BY r.started_at DESC
+            LIMIT {"%s" if is_postgres else "?"}
+        """
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query, (limit,))
+            cursor.execute(query, tuple(params))
             col_names = [desc[0] for desc in cursor.description]
             rows = [dict(zip(col_names, r)) for r in cursor.fetchall()]
             return [self._row_to_run(row, is_postgres=False) for row in rows]
@@ -585,6 +582,7 @@ class ScreeningRepository:
                 selected_count=int(row.get("selected_count") or 0),
                 trigger_type=row.get("trigger_type") or "instant",
                 notification_email=row.get("notification_email"),
+                owner_email=row.get("owner_email"),
             )
         else:
             return ScreeningRunRecord(
@@ -605,6 +603,7 @@ class ScreeningRepository:
                 selected_count=int(row[14]) if len(row) > 14 and row[14] is not None and str(row[14]).isdigit() else 0,
                 trigger_type=row[15] if len(row) > 15 and row[15] is not None else "instant",
                 notification_email=row[16] if len(row) > 16 else None,
+                owner_email=row[17] if len(row) > 17 else None,
             )
 
     def _row_to_result(self, row: Any, is_postgres: bool) -> ScreeningResultRecord:

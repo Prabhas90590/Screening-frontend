@@ -24,6 +24,10 @@ from app.repositories.screening_repository import (
     ScreeningRepository,
     screening_repository,
 )
+from app.repositories.user_repository import (  # Phase 2 – authentication
+    UserRepository,
+    user_repository,
+)
 
 __all__ = [
     "CompanyRepository",
@@ -38,4 +42,6 @@ __all__ = [
     "decision_repository",
     "RuleRepository",
     "rule_repository",
+    "UserRepository",          # Phase 2 – authentication
+    "user_repository",         # Phase 2 – authentication
 ]

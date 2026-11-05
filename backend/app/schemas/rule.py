@@ -79,6 +79,8 @@ class RuleProfileSchema(BaseModel):
     diversification_rules: Dict[str, Any] = Field(default_factory=dict)
     changes: List[str] = Field(default_factory=list, description="Comparison diff from previous version")
     selected_countries: List[str] = Field(default_factory=list, description="Selected country names")
+    owner_email: Optional[str] = None
+    user_id: Optional[str] = None
     rules: List[RuleMetricItem] = Field(default_factory=list)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -94,6 +96,7 @@ class CreateProfileRequest(BaseModel):
     diversification_rules: Dict[str, Any] = Field(default_factory=dict)
     changes: List[str] = Field(default_factory=list, description="Comparison diff from previous version")
     selected_countries: List[str] = Field(default_factory=list, description="Selected country names")
+    owner_email: Optional[str] = None
     rules: List[RuleMetricItem] = Field(default_factory=list)
 
 

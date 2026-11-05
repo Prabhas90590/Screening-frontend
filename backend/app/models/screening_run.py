@@ -24,6 +24,8 @@ class ScreeningRunRecord(BaseModel):
     universe_count: Optional[int] = 0
     selected_count: Optional[int] = 0
     notification_email: Optional[str] = Field(default=None, description='Notification email recipient')
+    owner_email: Optional[str] = Field(default=None, description="User email owning this run")
+    user_id: Optional[str] = Field(default=None, description="User UUID owning this run")
 
 
 class FunnelCountRecord(BaseModel):

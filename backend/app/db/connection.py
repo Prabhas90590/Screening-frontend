@@ -487,6 +487,19 @@ CREATE TABLE IF NOT EXISTS audit_events (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_audit_events_type ON audit_events(event_type, created_at DESC);
+
+-- Auth: User accounts table (Phase 1 - user-side login)
+CREATE TABLE IF NOT EXISTS users (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email            VARCHAR(255) NOT NULL UNIQUE,
+    hashed_password  VARCHAR(255) NOT NULL,
+    full_name        VARCHAR(255),
+    is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_email VARCHAR(255)
+);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 """
 
 # SQLite equivalent DDL (for automatic fallback if Postgres is offline)
@@ -767,6 +780,19 @@ CREATE TABLE IF NOT EXISTS audit_events (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_audit_events_type ON audit_events(event_type, created_at DESC);
+
+-- Auth: User accounts table (Phase 1 - user-side login)
+CREATE TABLE IF NOT EXISTS users (
+    id               TEXT PRIMARY KEY,
+    email            TEXT NOT NULL UNIQUE,
+    hashed_password  TEXT NOT NULL,
+    full_name        TEXT,
+    is_active        INTEGER NOT NULL DEFAULT 1,
+    created_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_email TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 """
 
 
@@ -941,6 +967,30 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMP WITH TIME ZONE;")
                 cursor.execute("ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR(32) DEFAULT 'instant';")
                 cursor.execute("ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS notification_email TEXT;")
+                # Phase 9: Data Ownership & Scoping (Multi-user isolation)
+                cursor.execute("ALTER TABLE rule_versions ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);")
+                cursor.execute("ALTER TABLE rule_versions ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255);")
+                cursor.execute("ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);")
+                cursor.execute("ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255);")
+                cursor.execute("ALTER TABLE decisions ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);")
+                cursor.execute("ALTER TABLE decisions ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255);")
+                cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);")
+                cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255);")
+                # Backfill unassigned legacy work dynamically to the primary registered user in the database
+                cursor.execute("SELECT id, email FROM users ORDER BY created_at ASC LIMIT 1;")
+                primary_user = cursor.fetchone()
+                if primary_user:
+                    p_id, p_email = primary_user[0], primary_user[1]
+                    cursor.execute("UPDATE rule_versions SET user_id = %s, owner_email = %s WHERE user_id IS NULL OR user_id = '';", (p_id, p_email))
+                    cursor.execute("UPDATE screening_runs SET user_id = %s, owner_email = %s WHERE user_id IS NULL OR user_id = '';", (p_id, p_email))
+                    cursor.execute("UPDATE decisions SET user_id = %s, owner_email = %s WHERE user_id IS NULL OR user_id = '';", (p_id, p_email))
+                    cursor.execute("UPDATE schedules SET user_id = %s, owner_email = %s WHERE user_id IS NULL OR user_id = '';", (p_id, p_email))
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_rule_versions_user_id ON rule_versions(user_id);")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_rule_versions_owner ON rule_versions(owner_email);")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_screening_runs_user_id ON screening_runs(user_id);")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_screening_runs_owner ON screening_runs(owner_email);")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_decisions_user_id ON decisions(user_id);")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_decisions_owner ON decisions(owner_email);")
                 conn.commit()
                 logger.info("PostgreSQL persistence tables verified/created successfully.")
             else:
@@ -963,6 +1013,15 @@ class DatabaseManager:
                 ]:
                     try:
                         cursor.execute(f"ALTER TABLE schedules ADD COLUMN {col_def};")
+                    except Exception:
+                        pass
+                for tbl in ["rule_versions", "screening_runs", "decisions", "schedules"]:
+                    try:
+                        cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN user_id TEXT;")
+                    except Exception:
+                        pass
+                    try:
+                        cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN owner_email TEXT;")
                     except Exception:
                         pass
                 conn.commit()
