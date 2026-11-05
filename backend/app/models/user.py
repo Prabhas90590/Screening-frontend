@@ -14,7 +14,7 @@ from pydantic import BaseModel, EmailStr, Field
 class UserRecord(BaseModel):
     """Database model for the 'users' table."""
 
-    id: str = Field(..., description="UUID primary key (gen_random_uuid() on Postgres, str UUID on SQLite)")
+    id: str = Field(..., description="UUID primary key (gen_random_uuid() on PostgreSQL)")
     email: str = Field(..., description="Unique login email address")
     hashed_password: str = Field(..., description="bcrypt hash of the user's password (never the raw password)")
     full_name: Optional[str] = Field(None, description="Display name shown in the UI header")

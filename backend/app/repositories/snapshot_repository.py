@@ -11,7 +11,7 @@ logger = logging.getLogger("app.repositories.snapshot")
 
 
 class SnapshotRepository:
-    """Repository for managing financial statement and analyst estimate snapshots."""
+    """Repository for managing financial statement and analyst estimate snapshots in PostgreSQL."""
 
     def __init__(self):
         db_manager.init_tables()
@@ -23,7 +23,6 @@ class SnapshotRepository:
     def save_financial_snapshot(self, record: FinancialSnapshotRecord) -> str:
         """Insert or update a financial statement snapshot."""
         conn = db_manager.get_connection()
-        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
 
         insert_sql = """
             INSERT INTO financial_snapshots (
@@ -42,26 +41,7 @@ class SnapshotRepository:
                 operating_income = EXCLUDED.operating_income,
                 net_income = EXCLUDED.net_income,
                 free_cash_flow = EXCLUDED.free_cash_flow;
-        """ if is_postgres else """
-            INSERT INTO financial_snapshots (
-                id, canonical_company_id, as_of_date, currency,
-                ebitda, net_debt, total_debt, cash, revenue,
-                operating_income, net_income, free_cash_flow, created_at
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            )
-            ON CONFLICT (id) DO UPDATE SET
-                ebitda = excluded.ebitda,
-                net_debt = excluded.net_debt,
-                total_debt = excluded.total_debt,
-                cash = excluded.cash,
-                revenue = excluded.revenue,
-                operating_income = excluded.operating_income,
-                net_income = excluded.net_income,
-                free_cash_flow = excluded.free_cash_flow;
         """
-
-        created_at_val = record.created_at if is_postgres else record.created_at.isoformat()
 
         try:
             cursor = conn.cursor()
@@ -80,7 +60,7 @@ class SnapshotRepository:
                     record.operating_income,
                     record.net_income,
                     record.free_cash_flow,
-                    created_at_val,
+                    record.created_at,
                 ),
             )
             conn.commit()
@@ -93,44 +73,39 @@ class SnapshotRepository:
             conn.close()
 
     def save_financial_snapshots_batch(self, records: List[FinancialSnapshotRecord]) -> int:
-        """Bulk insert financial snapshots with de-duplication."""
+        """Bulk insert financial snapshots with de-duplication using PostgreSQL execute_values."""
         if not records:
             return 0
         conn = db_manager.get_connection()
-        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
         deduped = list({r.id: r for r in records}.values())
         try:
             cursor = conn.cursor()
-            if is_postgres:
-                from psycopg2.extras import execute_values
-                pg_sql = """
-                    INSERT INTO financial_snapshots (
-                        id, canonical_company_id, as_of_date, currency,
-                        ebitda, net_debt, total_debt, cash, revenue,
-                        operating_income, net_income, free_cash_flow, created_at
-                    ) VALUES %s
-                    ON CONFLICT (id) DO UPDATE SET
-                        ebitda = EXCLUDED.ebitda,
-                        net_debt = EXCLUDED.net_debt,
-                        total_debt = EXCLUDED.total_debt,
-                        cash = EXCLUDED.cash,
-                        revenue = EXCLUDED.revenue,
-                        operating_income = EXCLUDED.operating_income,
-                        net_income = EXCLUDED.net_income,
-                        free_cash_flow = EXCLUDED.free_cash_flow;
-                """
-                tuples = [
-                    (
-                        r.id, r.canonical_company_id, r.as_of_date, r.currency,
-                        r.ebitda, r.net_debt, r.total_debt, r.cash, r.revenue,
-                        r.operating_income, r.net_income, r.free_cash_flow, r.created_at
-                    )
-                    for r in deduped
-                ]
-                execute_values(cursor, pg_sql, tuples, page_size=1000)
-            else:
-                for r in deduped:
-                    self.save_financial_snapshot(r)
+            from psycopg2.extras import execute_values
+            pg_sql = """
+                INSERT INTO financial_snapshots (
+                    id, canonical_company_id, as_of_date, currency,
+                    ebitda, net_debt, total_debt, cash, revenue,
+                    operating_income, net_income, free_cash_flow, created_at
+                ) VALUES %s
+                ON CONFLICT (id) DO UPDATE SET
+                    ebitda = EXCLUDED.ebitda,
+                    net_debt = EXCLUDED.net_debt,
+                    total_debt = EXCLUDED.total_debt,
+                    cash = EXCLUDED.cash,
+                    revenue = EXCLUDED.revenue,
+                    operating_income = EXCLUDED.operating_income,
+                    net_income = EXCLUDED.net_income,
+                    free_cash_flow = EXCLUDED.free_cash_flow;
+            """
+            tuples = [
+                (
+                    r.id, r.canonical_company_id, r.as_of_date, r.currency,
+                    r.ebitda, r.net_debt, r.total_debt, r.cash, r.revenue,
+                    r.operating_income, r.net_income, r.free_cash_flow, r.created_at
+                )
+                for r in deduped
+            ]
+            execute_values(cursor, pg_sql, tuples, page_size=1000)
             conn.commit()
             return len(deduped)
         except Exception as e:
@@ -141,42 +116,37 @@ class SnapshotRepository:
             conn.close()
 
     def save_estimate_snapshots_batch(self, records: List[EstimateSnapshotRecord]) -> int:
-        """Bulk insert estimate snapshots with de-duplication."""
+        """Bulk insert estimate snapshots with de-duplication using PostgreSQL execute_values."""
         if not records:
             return 0
         conn = db_manager.get_connection()
-        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
         deduped = list({r.id: r for r in records}.values())
         try:
             cursor = conn.cursor()
-            if is_postgres:
-                from psycopg2.extras import execute_values
-                pg_sql = """
-                    INSERT INTO estimate_snapshots (
-                        id, canonical_company_id, as_of_date,
-                        forward_pe, peg_ratio, eps_growth_fwd, analyst_count,
-                        target_price, recommendation_mean, created_at
-                    ) VALUES %s
-                    ON CONFLICT (id) DO UPDATE SET
-                        forward_pe = EXCLUDED.forward_pe,
-                        peg_ratio = EXCLUDED.peg_ratio,
-                        eps_growth_fwd = EXCLUDED.eps_growth_fwd,
-                        analyst_count = EXCLUDED.analyst_count,
-                        target_price = EXCLUDED.target_price,
-                        recommendation_mean = EXCLUDED.recommendation_mean;
-                """
-                tuples = [
-                    (
-                        r.id, r.canonical_company_id, r.as_of_date,
-                        r.forward_pe, r.peg_ratio, r.eps_growth_fwd, r.analyst_count,
-                        r.target_price, r.recommendation_mean, r.created_at
-                    )
-                    for r in deduped
-                ]
-                execute_values(cursor, pg_sql, tuples, page_size=1000)
-            else:
-                for r in deduped:
-                    self.save_estimate_snapshot(r)
+            from psycopg2.extras import execute_values
+            pg_sql = """
+                INSERT INTO estimate_snapshots (
+                    id, canonical_company_id, as_of_date,
+                    forward_pe, peg_ratio, eps_growth_fwd, analyst_count,
+                    target_price, recommendation_mean, created_at
+                ) VALUES %s
+                ON CONFLICT (id) DO UPDATE SET
+                    forward_pe = EXCLUDED.forward_pe,
+                    peg_ratio = EXCLUDED.peg_ratio,
+                    eps_growth_fwd = EXCLUDED.eps_growth_fwd,
+                    analyst_count = EXCLUDED.analyst_count,
+                    target_price = EXCLUDED.target_price,
+                    recommendation_mean = EXCLUDED.recommendation_mean;
+            """
+            tuples = [
+                (
+                    r.id, r.canonical_company_id, r.as_of_date,
+                    r.forward_pe, r.peg_ratio, r.eps_growth_fwd, r.analyst_count,
+                    r.target_price, r.recommendation_mean, r.created_at
+                )
+                for r in deduped
+            ]
+            execute_values(cursor, pg_sql, tuples, page_size=1000)
             conn.commit()
             return len(deduped)
         except Exception as e:
@@ -189,8 +159,7 @@ class SnapshotRepository:
     def get_financial_snapshots_by_company(self, canonical_company_id: str) -> List[FinancialSnapshotRecord]:
         """Fetch all historical financial snapshots for a canonical company."""
         conn = db_manager.get_connection()
-        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-        query = "SELECT * FROM financial_snapshots WHERE canonical_company_id = %s ORDER BY as_of_date DESC" if is_postgres else "SELECT * FROM financial_snapshots WHERE canonical_company_id = ? ORDER BY as_of_date DESC"
+        query = "SELECT * FROM financial_snapshots WHERE canonical_company_id = %s ORDER BY as_of_date DESC"
 
         try:
             cursor = conn.cursor()
@@ -200,18 +169,18 @@ class SnapshotRepository:
             for r in rows:
                 results.append(
                     FinancialSnapshotRecord(
-                        id=r[0] if is_postgres else r["id"],
-                        canonical_company_id=r[1] if is_postgres else r["canonical_company_id"],
-                        as_of_date=r[2] if is_postgres else r["as_of_date"],
-                        currency=r[3] if is_postgres else r["currency"],
-                        ebitda=r[4] if is_postgres else r["ebitda"],
-                        net_debt=r[5] if is_postgres else r["net_debt"],
-                        total_debt=r[6] if is_postgres else r["total_debt"],
-                        cash=r[7] if is_postgres else r["cash"],
-                        revenue=r[8] if is_postgres else r["revenue"],
-                        operating_income=r[9] if is_postgres else r["operating_income"],
-                        net_income=r[10] if is_postgres else r["net_income"],
-                        free_cash_flow=r[11] if is_postgres else r["free_cash_flow"],
+                        id=r[0],
+                        canonical_company_id=r[1],
+                        as_of_date=r[2],
+                        currency=r[3],
+                        ebitda=r[4],
+                        net_debt=r[5],
+                        total_debt=r[6],
+                        cash=r[7],
+                        revenue=r[8],
+                        operating_income=r[9],
+                        net_income=r[10],
+                        free_cash_flow=r[11],
                     )
                 )
             return results
@@ -225,7 +194,6 @@ class SnapshotRepository:
     def save_estimate_snapshot(self, record: EstimateSnapshotRecord) -> str:
         """Insert or update an analyst estimate snapshot."""
         conn = db_manager.get_connection()
-        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
 
         insert_sql = """
             INSERT INTO estimate_snapshots (
@@ -242,24 +210,7 @@ class SnapshotRepository:
                 analyst_count = EXCLUDED.analyst_count,
                 target_price = EXCLUDED.target_price,
                 recommendation_mean = EXCLUDED.recommendation_mean;
-        """ if is_postgres else """
-            INSERT INTO estimate_snapshots (
-                id, canonical_company_id, as_of_date,
-                forward_pe, peg_ratio, eps_growth_fwd, analyst_count,
-                target_price, recommendation_mean, created_at
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            )
-            ON CONFLICT (id) DO UPDATE SET
-                forward_pe = excluded.forward_pe,
-                peg_ratio = excluded.peg_ratio,
-                eps_growth_fwd = excluded.eps_growth_fwd,
-                analyst_count = excluded.analyst_count,
-                target_price = excluded.target_price,
-                recommendation_mean = excluded.recommendation_mean;
         """
-
-        created_at_val = record.created_at if is_postgres else record.created_at.isoformat()
 
         try:
             cursor = conn.cursor()
@@ -275,7 +226,7 @@ class SnapshotRepository:
                     record.analyst_count,
                     record.target_price,
                     record.recommendation_mean,
-                    created_at_val,
+                    record.created_at,
                 ),
             )
             conn.commit()
@@ -290,8 +241,7 @@ class SnapshotRepository:
     def get_estimate_snapshots_by_company(self, canonical_company_id: str) -> List[EstimateSnapshotRecord]:
         """Fetch all historical estimate snapshots for a canonical company."""
         conn = db_manager.get_connection()
-        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-        query = "SELECT * FROM estimate_snapshots WHERE canonical_company_id = %s ORDER BY as_of_date DESC" if is_postgres else "SELECT * FROM estimate_snapshots WHERE canonical_company_id = ? ORDER BY as_of_date DESC"
+        query = "SELECT * FROM estimate_snapshots WHERE canonical_company_id = %s ORDER BY as_of_date DESC"
 
         try:
             cursor = conn.cursor()
@@ -301,15 +251,15 @@ class SnapshotRepository:
             for r in rows:
                 results.append(
                     EstimateSnapshotRecord(
-                        id=r[0] if is_postgres else r["id"],
-                        canonical_company_id=r[1] if is_postgres else r["canonical_company_id"],
-                        as_of_date=r[2] if is_postgres else r["as_of_date"],
-                        forward_pe=r[3] if is_postgres else r["forward_pe"],
-                        peg_ratio=r[4] if is_postgres else r["peg_ratio"],
-                        eps_growth_fwd=r[5] if is_postgres else r["eps_growth_fwd"],
-                        analyst_count=r[6] if is_postgres else r["analyst_count"],
-                        target_price=r[7] if is_postgres else r["target_price"],
-                        recommendation_mean=r[8] if is_postgres else r["recommendation_mean"],
+                        id=r[0],
+                        canonical_company_id=r[1],
+                        as_of_date=r[2],
+                        forward_pe=r[3],
+                        peg_ratio=r[4],
+                        eps_growth_fwd=r[5],
+                        analyst_count=r[6],
+                        target_price=r[7],
+                        recommendation_mean=r[8],
                     )
                 )
             return results
@@ -318,4 +268,3 @@ class SnapshotRepository:
 
 
 snapshot_repository = SnapshotRepository()
-

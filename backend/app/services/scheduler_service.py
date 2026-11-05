@@ -282,8 +282,7 @@ class SchedulerService:
         ]
         try:
             cursor = conn.cursor()
-            is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-            param = "%s" if is_postgres else "?"
+            param = "%s"
 
             # Search across dedicated cadence tables first
             for tbl in ALL_CADENCE_TABLES:
@@ -355,8 +354,7 @@ class SchedulerService:
             cursor = conn.cursor()
             act_days_str = ",".join(config.active_days) if config.active_days is not None else "mon,tue,wed,thu,fri"
             trig_str = json.dumps(config.notify_triggers)
-            is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-            param = "%s" if is_postgres else "?"
+            param = "%s"
 
             target_table = CADENCE_TABLES.get(clean_freq, "schedules_daily")
 
@@ -369,8 +367,7 @@ class SchedulerService:
                         pass
 
             # Upsert into dedicated cadence table
-            if is_postgres:
-                cursor.execute(
+            cursor.execute(
                     f"""
                     INSERT INTO {target_table} (
                         schedule_id, profile_id, profile_name, frequency, daily_type,
@@ -411,95 +408,52 @@ class SchedulerService:
                         trig_str, next_run, now_utc,
                     ),
                 )
-                # Also sync unified schedules table
-                try:
-                    cursor.execute(
-                        """
-                        INSERT INTO schedules (
-                            schedule_id, profile_id, profile_name, frequency, daily_type,
-                            active_days, day_of_month, time_of_day, timezone, cron_expression,
-                            is_enabled, auto_run, refresh_data_first, skip_holidays,
-                            notify_on_complete, notification_email, notify_triggers,
-                            next_run_at, updated_at
-                        ) VALUES (
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                        )
-                        ON CONFLICT (schedule_id) DO UPDATE SET
-                            profile_id = EXCLUDED.profile_id,
-                            profile_name = EXCLUDED.profile_name,
-                            frequency = EXCLUDED.frequency,
-                            daily_type = EXCLUDED.daily_type,
-                            active_days = EXCLUDED.active_days,
-                            day_of_month = EXCLUDED.day_of_month,
-                            time_of_day = EXCLUDED.time_of_day,
-                            timezone = EXCLUDED.timezone,
-                            cron_expression = EXCLUDED.cron_expression,
-                            is_enabled = EXCLUDED.is_enabled,
-                            auto_run = EXCLUDED.auto_run,
-                            refresh_data_first = EXCLUDED.refresh_data_first,
-                            skip_holidays = EXCLUDED.skip_holidays,
-                            notify_on_complete = EXCLUDED.notify_on_complete,
-                            notification_email = EXCLUDED.notification_email,
-                            notify_triggers = EXCLUDED.notify_triggers,
-                            next_run_at = EXCLUDED.next_run_at,
-                            updated_at = EXCLUDED.updated_at;
-                        """,
-                        (
-                            config.schedule_id, config.profile_id, config.profile_name,
-                            config.frequency, config.daily_type, act_days_str,
-                            config.day_of_month, config.time_of_day, config.timezone,
-                            config.cron_expression, config.is_enabled, config.auto_run,
-                            config.refresh_data_first, config.skip_holidays,
-                            config.notify_on_complete, config.notification_email,
-                            trig_str, next_run, now_utc,
-                        ),
-                    )
-                except Exception:
-                    pass
-            else:
+            # Also sync unified schedules table
+            try:
                 cursor.execute(
-                    f"""
-                    INSERT OR REPLACE INTO {target_table} (
+                    """
+                    INSERT INTO schedules (
                         schedule_id, profile_id, profile_name, frequency, daily_type,
                         active_days, day_of_month, time_of_day, timezone, cron_expression,
                         is_enabled, auto_run, refresh_data_first, skip_holidays,
                         notify_on_complete, notification_email, notify_triggers,
                         next_run_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    ON CONFLICT (schedule_id) DO UPDATE SET
+                        profile_id = EXCLUDED.profile_id,
+                        profile_name = EXCLUDED.profile_name,
+                        frequency = EXCLUDED.frequency,
+                        daily_type = EXCLUDED.daily_type,
+                        active_days = EXCLUDED.active_days,
+                        day_of_month = EXCLUDED.day_of_month,
+                        time_of_day = EXCLUDED.time_of_day,
+                        timezone = EXCLUDED.timezone,
+                        cron_expression = EXCLUDED.cron_expression,
+                        is_enabled = EXCLUDED.is_enabled,
+                        auto_run = EXCLUDED.auto_run,
+                        refresh_data_first = EXCLUDED.refresh_data_first,
+                        skip_holidays = EXCLUDED.skip_holidays,
+                        notify_on_complete = EXCLUDED.notify_on_complete,
+                        notification_email = EXCLUDED.notification_email,
+                        notify_triggers = EXCLUDED.notify_triggers,
+                        next_run_at = EXCLUDED.next_run_at,
+                        updated_at = EXCLUDED.updated_at;
                     """,
                     (
                         config.schedule_id, config.profile_id, config.profile_name,
                         config.frequency, config.daily_type, act_days_str,
                         config.day_of_month, config.time_of_day, config.timezone,
-                        config.cron_expression, int(config.is_enabled), int(config.auto_run),
-                        int(config.refresh_data_first), int(config.skip_holidays),
-                        int(config.notify_on_complete), config.notification_email,
-                        trig_str, str(next_run) if next_run else None, str(now_utc),
+                        config.cron_expression, config.is_enabled, config.auto_run,
+                        config.refresh_data_first, config.skip_holidays,
+                        config.notify_on_complete, config.notification_email,
+                        trig_str, next_run, now_utc,
                     ),
                 )
-                try:
-                    cursor.execute(
-                        """
-                        INSERT OR REPLACE INTO schedules (
-                            schedule_id, profile_id, profile_name, frequency, daily_type,
-                            active_days, day_of_month, time_of_day, timezone, cron_expression,
-                            is_enabled, auto_run, refresh_data_first, skip_holidays,
-                            notify_on_complete, notification_email, notify_triggers,
-                            next_run_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            config.schedule_id, config.profile_id, config.profile_name,
-                            config.frequency, config.daily_type, act_days_str,
-                            config.day_of_month, config.time_of_day, config.timezone,
-                            config.cron_expression, int(config.is_enabled), int(config.auto_run),
-                            int(config.refresh_data_first), int(config.skip_holidays),
-                            int(config.notify_on_complete), config.notification_email,
-                            trig_str, str(next_run) if next_run else None, str(now_utc),
-                        ),
-                    )
-                except Exception:
-                    pass
+            except Exception:
+                pass
+
 
             conn.commit()
             logger.info(f"[SCHEDULER:SAVE] Saved distinct schedule '{config.schedule_id}' into table '{target_table}' ({config.frequency} @ {config.time_of_day}). Next run: {next_run}")
@@ -515,8 +469,7 @@ class SchedulerService:
         conn = db_manager.get_connection()
         try:
             cursor = conn.cursor()
-            is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-            param = "%s" if is_postgres else "?"
+            param = "%s"
             deleted_any = False
 
             for tbl in ALL_CADENCE_TABLES + ["schedules"]:

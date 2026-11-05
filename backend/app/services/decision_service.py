@@ -36,20 +36,16 @@ class DecisionService:
             return "comp-unknown"
 
         conn = db_manager.get_connection()
-        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-
         try:
             cursor = conn.cursor()
             # 1. Exact match by canonical_id
-            query1 = "SELECT canonical_id FROM companies WHERE canonical_id = %s" if is_postgres else "SELECT canonical_id FROM companies WHERE canonical_id = ?"
-            cursor.execute(query1, (identifier,))
+            cursor.execute("SELECT canonical_id FROM companies WHERE canonical_id = %s", (identifier,))
             row = cursor.fetchone()
             if row:
                 return row[0] if isinstance(row, tuple) else row["canonical_id"]
 
             # 2. Case-insensitive match by primary_ticker
-            query2 = "SELECT canonical_id FROM companies WHERE UPPER(primary_ticker) = UPPER(%s) LIMIT 1" if is_postgres else "SELECT canonical_id FROM companies WHERE UPPER(primary_ticker) = UPPER(?) LIMIT 1"
-            cursor.execute(query2, (identifier,))
+            cursor.execute("SELECT canonical_id FROM companies WHERE UPPER(primary_ticker) = UPPER(%s) LIMIT 1", (identifier,))
             row = cursor.fetchone()
             if row:
                 return row[0] if isinstance(row, tuple) else row["canonical_id"]
@@ -60,9 +56,6 @@ class DecisionService:
                 INSERT INTO companies (canonical_id, primary_ticker, name, country, sector)
                 VALUES (%s, %s, %s, 'GLOBAL', 'General')
                 ON CONFLICT (canonical_id) DO NOTHING;
-            """ if is_postgres else """
-                INSERT OR IGNORE INTO companies (canonical_id, primary_ticker, name, country, sector)
-                VALUES (?, ?, ?, 'GLOBAL', 'General');
             """
             cursor.execute(insert_company, (clean_id, identifier.upper(), f"{identifier} Ltd"))
             conn.commit()
@@ -79,18 +72,14 @@ class DecisionService:
             return provided_name.strip()
 
         conn = db_manager.get_connection()
-        is_postgres = hasattr(conn, "info") or "psycopg2" in str(type(conn))
-
         try:
             cursor = conn.cursor()
-            query1 = "SELECT name FROM companies WHERE canonical_id = %s" if is_postgres else "SELECT name FROM companies WHERE canonical_id = ?"
-            cursor.execute(query1, (canonical_id,))
+            cursor.execute("SELECT name FROM companies WHERE canonical_id = %s", (canonical_id,))
             row = cursor.fetchone()
             if row and row[0]:
                 return row[0] if isinstance(row, tuple) else row["name"]
 
-            query2 = "SELECT company_name FROM screening_results WHERE canonical_company_id = %s LIMIT 1" if is_postgres else "SELECT company_name FROM screening_results WHERE canonical_company_id = ? LIMIT 1"
-            cursor.execute(query2, (canonical_id,))
+            cursor.execute("SELECT company_name FROM screening_results WHERE canonical_company_id = %s LIMIT 1", (canonical_id,))
             row2 = cursor.fetchone()
             if row2 and row2[0]:
                 return row2[0] if isinstance(row2, tuple) else row2["company_name"]

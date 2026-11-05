@@ -1,6 +1,6 @@
 """Repository for user account persistence.
 
-Handles all SQL read/write operations against the 'users' table.
+Handles all SQL read/write operations against the 'users' table in PostgreSQL.
 Follows the same pattern as DecisionRepository and RuleRepository.
 """
 
@@ -17,7 +17,7 @@ logger = logging.getLogger("app.repositories.user")
 
 
 class UserRepository:
-    """SQL repository for the 'users' table."""
+    """SQL repository for the 'users' table in PostgreSQL."""
 
     def __init__(self):
         db_manager.init_tables()
@@ -27,12 +27,8 @@ class UserRepository:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _is_postgres(conn) -> bool:
-        return hasattr(conn, "info") or "psycopg2" in str(type(conn))
-
-    @staticmethod
     def _row_to_record(row) -> Optional[UserRecord]:
-        """Convert a DB row (psycopg2 tuple or sqlite3 Row) to a UserRecord."""
+        """Convert a PostgreSQL DB row to a UserRecord."""
         if row is None:
             return None
         return UserRecord(
@@ -51,26 +47,14 @@ class UserRepository:
     # ------------------------------------------------------------------
 
     def get_by_email(self, email: str) -> Optional[UserRecord]:
-        """Fetch a user record by their email address (case-insensitive).
-
-        Args:
-            email: The email address to look up.
-
-        Returns:
-            A UserRecord if found, None otherwise.
-        """
+        """Fetch a user record by their email address (case-insensitive)."""
         conn = db_manager.get_connection()
-        is_pg = self._is_postgres(conn)
         try:
             cur = conn.cursor()
             sql = (
                 "SELECT id, email, hashed_password, full_name, is_active, "
                 "created_at, updated_at, created_by_email "
                 "FROM users WHERE LOWER(email) = LOWER(%s);"
-                if is_pg else
-                "SELECT id, email, hashed_password, full_name, is_active, "
-                "created_at, updated_at, created_by_email "
-                "FROM users WHERE LOWER(email) = LOWER(?);"
             )
             cur.execute(sql, (email,))
             return self._row_to_record(cur.fetchone())
@@ -81,26 +65,14 @@ class UserRepository:
             conn.close()
 
     def get_by_id(self, user_id: str) -> Optional[UserRecord]:
-        """Fetch a user record by their UUID.
-
-        Args:
-            user_id: The UUID string of the user.
-
-        Returns:
-            A UserRecord if found, None otherwise.
-        """
+        """Fetch a user record by their UUID."""
         conn = db_manager.get_connection()
-        is_pg = self._is_postgres(conn)
         try:
             cur = conn.cursor()
             sql = (
                 "SELECT id, email, hashed_password, full_name, is_active, "
                 "created_at, updated_at, created_by_email "
                 "FROM users WHERE id = %s;"
-                if is_pg else
-                "SELECT id, email, hashed_password, full_name, is_active, "
-                "created_at, updated_at, created_by_email "
-                "FROM users WHERE id = ?;"
             )
             cur.execute(sql, (user_id,))
             return self._row_to_record(cur.fetchone())
@@ -111,14 +83,7 @@ class UserRepository:
             conn.close()
 
     def email_exists(self, email: str) -> bool:
-        """Check whether an email is already registered.
-
-        Args:
-            email: Email to check.
-
-        Returns:
-            True if the email is in the users table, False otherwise.
-        """
+        """Check whether an email is already registered."""
         return self.get_by_email(email) is not None
 
     # ------------------------------------------------------------------
@@ -132,21 +97,7 @@ class UserRepository:
         full_name: Optional[str] = None,
         created_by_email: Optional[str] = None,
     ) -> UserRecord:
-        """Create a new user account with a securely hashed password.
-
-        Args:
-            email:             Unique email address for the new account.
-            plain_password:    The raw password supplied at sign-up (will be hashed).
-            full_name:         Optional display name.
-            created_by_email:  Reserved for the Phase-9 ownership migration.
-
-        Returns:
-            The newly created UserRecord.
-
-        Raises:
-            ValueError: If the email is already registered.
-            RuntimeError: If the INSERT fails at the database level.
-        """
+        """Create a new user account with a securely hashed password."""
         if self.email_exists(email):
             raise ValueError(f"Email '{email}' is already registered.")
 
@@ -155,17 +106,12 @@ class UserRepository:
         now = datetime.now(timezone.utc)
 
         conn = db_manager.get_connection()
-        is_pg = self._is_postgres(conn)
         try:
             cur = conn.cursor()
             sql = (
                 "INSERT INTO users "
                 "(id, email, hashed_password, full_name, is_active, created_at, updated_at, created_by_email) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s);"
-                if is_pg else
-                "INSERT INTO users "
-                "(id, email, hashed_password, full_name, is_active, created_at, updated_at, created_by_email) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
             )
             cur.execute(sql, (
                 user_id,
@@ -173,8 +119,8 @@ class UserRepository:
                 hashed,
                 full_name,
                 True,
-                now.isoformat(),
-                now.isoformat(),
+                now,
+                now,
                 created_by_email,
             ))
             conn.commit()
@@ -198,21 +144,12 @@ class UserRepository:
         )
 
     def update_last_seen(self, user_id: str) -> None:
-        """Bump the updated_at timestamp for a user (used as a last-active marker).
-
-        Args:
-            user_id: UUID of the user to update.
-        """
+        """Bump the updated_at timestamp for a user (used as a last-active marker)."""
         conn = db_manager.get_connection()
-        is_pg = self._is_postgres(conn)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
         try:
             cur = conn.cursor()
-            sql = (
-                "UPDATE users SET updated_at = %s WHERE id = %s;"
-                if is_pg else
-                "UPDATE users SET updated_at = ? WHERE id = ?;"
-            )
+            sql = "UPDATE users SET updated_at = %s WHERE id = %s;"
             cur.execute(sql, (now, user_id))
             conn.commit()
         except Exception as e:
@@ -223,4 +160,3 @@ class UserRepository:
 
 # Module-level singleton — imported by auth_service and future routes
 user_repository = UserRepository()
-
