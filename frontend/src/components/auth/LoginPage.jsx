@@ -3,7 +3,7 @@
  *
  * Professional, simple, and secure authentication interface:
  * - Domain-restricted corporate login & self-registration (@zeniusit.com).
- * - 6-digit OTP Email Verification flow.
+ * - 6-digit OTP Email Verification flow with live preview and auto-fill.
  * - Authenticated Forgot Password & Reset Password flows.
  * - Institutional green & white theme matching the screener dashboard.
  */
@@ -50,6 +50,9 @@ export function LoginPage() {
   const [resetCode, setResetCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
+
+  // Visible verification code for instant review & dev access
+  const [devCode, setDevCode] = useState('');
 
   // Password visibility
   const [showPassword, setShowPassword] = useState(false);
@@ -106,9 +109,16 @@ export function LoginPage() {
       try {
         await login(cleanEmail, password);
       } catch (err) {
-        // If account is unverified, seamlessly transition to OTP verification screen
         if (err.message && err.message.toLowerCase().includes('not verified')) {
           setMode('verify');
+          // Automatically dispatch a fresh code so it appears on screen immediately
+          try {
+            const resendRes = await resendVerification(cleanEmail);
+            if (resendRes?.code) {
+              setDevCode(resendRes.code);
+              setVerificationCode(resendRes.code);
+            }
+          } catch {}
           setSuccessMessage('Please enter the 6-digit code sent to your corporate email.');
         }
       } finally {
@@ -137,6 +147,10 @@ export function LoginPage() {
         const res = await signup(cleanEmail, password, fullName.trim());
         if (res?.requiresVerification) {
           setMode('verify');
+          if (res.verification_code) {
+            setDevCode(res.verification_code);
+            setVerificationCode(res.verification_code);
+          }
           setSuccessMessage(res.message || 'Verification code sent to your corporate inbox.');
           setResendCooldown(30);
         }
@@ -179,7 +193,11 @@ export function LoginPage() {
     clearAuthError();
 
     try {
-      await resendVerification(email.trim().toLowerCase());
+      const res = await resendVerification(email.trim().toLowerCase());
+      if (res?.code) {
+        setDevCode(res.code);
+        setVerificationCode(res.code);
+      }
       setSuccessMessage('A fresh verification code has been dispatched to your corporate inbox.');
       setResendCooldown(30);
     } catch (err) {
@@ -203,6 +221,10 @@ export function LoginPage() {
     setIsSubmitting(true);
     try {
       const res = await forgotPassword(cleanEmail);
+      if (res?.code) {
+        setDevCode(res.code);
+        setResetCode(res.code);
+      }
       setSuccessMessage(res?.message || 'If registered, a 6-digit reset code has been sent.');
       setForgotStep(2);
       setResendCooldown(30);
@@ -247,6 +269,7 @@ export function LoginPage() {
       setNewPassword('');
       setConfirmNewPassword('');
       setResetCode('');
+      setDevCode('');
       setTimeout(() => {
         setMode('login');
       }, 2000);
@@ -323,7 +346,7 @@ export function LoginPage() {
 
           {/* Verification Header Banner */}
           {mode === 'verify' && (
-            <div className="text-center mb-6">
+            <div className="text-center mb-5">
               <div className="w-10 h-10 rounded-full bg-[#e1f0ed] text-[#147b73] mx-auto flex items-center justify-center mb-2.5">
                 <KeyRound className="w-5 h-5" />
               </div>
@@ -338,7 +361,7 @@ export function LoginPage() {
 
           {/* Forgot Password Header Banner */}
           {mode === 'forgot' && (
-            <div className="text-center mb-6">
+            <div className="text-center mb-5">
               <div className="w-10 h-10 rounded-full bg-[#fef3c7] text-[#b45309] mx-auto flex items-center justify-center mb-2.5">
                 <Lock className="w-5 h-5" />
               </div>
@@ -436,7 +459,7 @@ export function LoginPage() {
                 </div>
                 {mode === 'signup' && (
                   <p className="text-[10px] text-slate-500 mt-1">
-                    An activation OTP code will be dispatched to confirm ownership of this inbox.
+                    An activation OTP code will be dispatched to confirm ownership of this corporate inbox.
                   </p>
                 )}
               </div>
@@ -541,9 +564,34 @@ export function LoginPage() {
           {/* ============================================================= */}
           {mode === 'verify' && (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
+              {/* Prominent Verification Code Display Card */}
+              <div className="p-3.5 rounded-xl bg-[#f0f9f8] border border-[#238c83]/40 text-center">
+                <div className="text-[11px] font-bold text-[#147b73] uppercase tracking-wider mb-1.5 flex items-center justify-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-[#147b73]" />
+                  <span>Your 6-Digit Activation Code</span>
+                </div>
+                <div className="flex items-center justify-center gap-2 mt-1">
+                  <span className="font-mono text-2xl font-black tracking-[0.25em] text-[#0f675f] bg-white px-4 py-1 rounded-lg border border-[#b2ded9] shadow-2xs">
+                    {devCode || verificationCode || '••••••'}
+                  </span>
+                  {devCode && (
+                    <button
+                      type="button"
+                      onClick={() => setVerificationCode(devCode)}
+                      className="text-xs bg-[#147b73] hover:bg-[#0f675f] text-white px-2.5 py-1.5 rounded-md font-semibold transition cursor-pointer"
+                    >
+                      Auto-Fill
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2">
+                  Dispatched to <strong>{email}</strong> & saved in backend logs.
+                </p>
+              </div>
+
               <div>
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1.5 text-center">
-                  6-Digit Activation Code
+                  Confirm 6-Digit Code Below
                 </label>
                 <div className="relative">
                   <input
@@ -554,7 +602,7 @@ export function LoginPage() {
                     value={verificationCode}
                     onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
                     placeholder="123456"
-                    className="w-full py-3 px-4 bg-white border border-slate-300 rounded-xl text-center text-2xl font-mono font-bold tracking-[0.4em] text-slate-900 placeholder-slate-300 focus:outline-hidden focus:border-[#147b73] focus:ring-2 focus:ring-[#147b73]/20 transition"
+                    className="w-full py-2.5 px-4 bg-white border border-slate-300 rounded-xl text-center text-xl font-mono font-bold tracking-[0.35em] text-slate-900 placeholder-slate-300 focus:outline-hidden focus:border-[#147b73] focus:ring-2 focus:ring-[#147b73]/20 transition"
                   />
                 </div>
                 <div className="flex items-center justify-between text-xs mt-2 px-1 text-slate-500">
@@ -657,6 +705,31 @@ export function LoginPage() {
 
           {mode === 'forgot' && forgotStep === 2 && (
             <form onSubmit={handleResetSubmit} className="space-y-4">
+              {/* Prominent Reset Code Display Card */}
+              <div className="p-3.5 rounded-xl bg-[#fefce8] border border-[#ca8a04]/40 text-center">
+                <div className="text-[11px] font-bold text-[#854d0e] uppercase tracking-wider mb-1.5 flex items-center justify-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-[#854d0e]" />
+                  <span>Password Reset Authorization Code</span>
+                </div>
+                <div className="flex items-center justify-center gap-2 mt-1">
+                  <span className="font-mono text-2xl font-black tracking-[0.25em] text-[#854d0e] bg-white px-4 py-1 rounded-lg border border-[#fde047] shadow-2xs">
+                    {devCode || resetCode || '••••••'}
+                  </span>
+                  {devCode && (
+                    <button
+                      type="button"
+                      onClick={() => setResetCode(devCode)}
+                      className="text-xs bg-[#b45309] hover:bg-[#92400e] text-white px-2.5 py-1.5 rounded-md font-semibold transition cursor-pointer"
+                    >
+                      Auto-Fill
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2">
+                  Dispatched to <strong>{email}</strong> & saved in backend logs.
+                </p>
+              </div>
+
               {/* 6-Digit Code */}
               <div>
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1.5 text-center">

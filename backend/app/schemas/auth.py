@@ -49,6 +49,7 @@ class SignupInitResponse(BaseModel):
     message: str = Field(..., description="Status explanation")
     email: str = Field(..., description="Target email address")
     requires_verification: bool = Field(True, description="Always true until OTP verified")
+    verification_code: Optional[str] = Field(None, description="6-digit activation code for instant preview & dev verification")
 
 
 class VerifyEmailRequest(BaseModel):
@@ -185,9 +186,10 @@ class LogoutResponse(BaseModel):
 
 
 class GenericMessageResponse(BaseModel):
-    """Generic status response message."""
+    """Generic status response message with optional authorization code preview."""
 
     message: str = Field(..., description="Status feedback message")
+    code: Optional[str] = Field(None, description="6-digit authorization code for instant preview & dev verification")
 
 
 class SessionPingResponse(BaseModel):

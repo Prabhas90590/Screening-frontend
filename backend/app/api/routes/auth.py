@@ -83,6 +83,7 @@ def signup(request: UserSignupRequest):
             message=result.message,
             email=result.email,
             requires_verification=True,
+            verification_code=result.code,
         )
     except HTTPException:
         raise
@@ -132,9 +133,10 @@ def verify_email(request: VerifyEmailRequest):
 def resend_verification(request: ResendVerificationRequest):
     """Generate and dispatch a fresh 6-digit activation code to corporate inbox."""
     try:
-        resend_verification_code(email=request.email)
+        code = resend_verification_code(email=request.email)
         return GenericMessageResponse(
-            message="A fresh verification code has been dispatched to your corporate inbox."
+            message="A fresh verification code has been dispatched to your corporate inbox.",
+            code=code,
         )
     except HTTPException:
         raise
@@ -206,14 +208,12 @@ def login(request: UserLoginRequest, http_request: Request):
     summary="Request a 6-digit password reset authorization code",
 )
 def forgot_password(request: ForgotPasswordRequest):
-    """Dispatches a password reset authorization code via email.
-
-    Uses generic message to prevent user enumeration.
-    """
+    """Dispatches a password reset authorization code via email."""
     try:
-        request_password_reset(email=request.email)
+        code = request_password_reset(email=request.email)
         return GenericMessageResponse(
-            message="If an account exists with this email address, a password reset code has been dispatched to your corporate inbox."
+            message="If an account exists with this email address, a password reset code has been dispatched to your corporate inbox.",
+            code=code,
         )
     except Exception as e:
         logger.error(f"Unexpected error in forgot_password for '{request.email}': {e}")

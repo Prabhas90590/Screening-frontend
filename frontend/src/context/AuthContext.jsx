@@ -56,7 +56,6 @@ export function AuthProvider({ children }) {
     }
 
     localStorage.removeItem('access_token');
-    // Clear all screening cache keys from localStorage so they don't leak between users
     try {
       const keysToRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
@@ -71,7 +70,6 @@ export function AuthProvider({ children }) {
     setUser(null);
     setIsProfileModalOpen(false);
 
-    // Transition URL to /login
     if (window.location.pathname !== '/login') {
       window.history.pushState({}, '', '/login');
       window.dispatchEvent(new PopStateEvent('popstate'));
@@ -86,7 +84,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   // -------------------------------------------------------------------------
-  // 2. Initialize / Rehydrate Session on Mount (e.g. after browser refresh)
+  // 2. Initialize / Rehydrate Session on Mount
   // -------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true;
@@ -117,7 +115,6 @@ export function AuthProvider({ children }) {
             setToken(null);
           }
         } else {
-          // If network delay or rapid reload: decode JWT payload safely so user stays in session
           try {
             const base64Url = savedToken.split('.')[1];
             const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
@@ -248,7 +245,7 @@ export function AuthProvider({ children }) {
   };
 
   // -------------------------------------------------------------------------
-  // 5. Sign-Up Function (Dispatches 6-digit corporate verification OTP)
+  // 5. Sign-Up Function
   // -------------------------------------------------------------------------
   const signup = async (email, password, fullName = '') => {
     setAuthError(null);
@@ -259,6 +256,7 @@ export function AuthProvider({ children }) {
         requiresVerification: true,
         email: res.email,
         message: res.message,
+        verification_code: res.verification_code,
       };
     } catch (err) {
       setAuthError(err.message || 'Sign-up failed');
