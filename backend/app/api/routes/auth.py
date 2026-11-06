@@ -42,6 +42,7 @@ from app.services.auth_service import (
     change_authenticated_password,
     complete_password_reset,
     get_current_user,
+    get_optional_user,
     register_user,
     request_password_reset,
     resend_verification_code,
@@ -328,7 +329,8 @@ def session_ping(current_user: UserRecord = Depends(get_current_user)):
     status_code=status.HTTP_200_OK,
     summary="Log out of the current session",
 )
-def logout(current_user: UserRecord = Depends(get_current_user)):
-    """Acknowledge session termination."""
-    logger.info(f"User logged out: {current_user.email} (id={current_user.id})")
+def logout(current_user: Optional[UserRecord] = Depends(get_optional_user)):
+    """Acknowledge session termination gracefully without requiring strict auth."""
+    if current_user:
+        logger.info(f"User logged out: {current_user.email} (id={current_user.id})")
     return LogoutResponse(message="Logged out successfully.")

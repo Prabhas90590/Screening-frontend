@@ -106,12 +106,11 @@ export function LoginPage() {
       try {
         await login(cleanEmail, password);
       } catch (err) {
-        if (err.message && err.message.toLowerCase().includes('not verified')) {
+        if (err.status === 403 || (err.message && err.message.toLowerCase().includes('not verified'))) {
           setMode('verify');
-          try {
-            await resendVerification(cleanEmail);
-          } catch {}
-          setSuccessMessage('A 6-digit verification code was sent to your corporate email. Please check your inbox.');
+          setVerificationCode('');
+          setSuccessMessage('Your account requires verification. Please enter the 6-digit verification code sent to your email.');
+          setClientError('');
         }
       } finally {
         setIsSubmitting(false);
@@ -144,7 +143,9 @@ export function LoginPage() {
           setResendCooldown(30);
         }
       } catch (err) {
-        // Handled by authError in context
+        if (err.status === 400 && err.message && err.message.toLowerCase().includes('already exists')) {
+          setClientError('An account with this corporate email already exists. Please sign in below.');
+        }
       } finally {
         setIsSubmitting(false);
       }
@@ -576,6 +577,10 @@ export function LoginPage() {
                     <span>{resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Code'}</span>
                   </button>
                 </div>
+                <p className="text-[11px] text-slate-500 mt-2 text-center bg-slate-50 p-2 rounded-lg border border-slate-200">
+                  Verification code dispatched to <strong>{email}</strong> via corporate email.<br />
+                  Please check your <strong>Inbox</strong> & <strong>Junk / Spam</strong> folder.
+                </p>
               </div>
 
               <button

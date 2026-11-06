@@ -531,7 +531,9 @@ export async function loginApi(email, password) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Login failed. Please check your credentials.');
+    const error = new Error(err.detail || 'Login failed. Please check your credentials.');
+    error.status = res.status;
+    throw error;
   }
   return await res.json();
 }
@@ -544,7 +546,9 @@ export async function signupApi(email, password, fullName = '') {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Sign up failed. Please try again.');
+    const error = new Error(err.detail || 'Sign up failed. Please try again.');
+    error.status = res.status;
+    throw error;
   }
   return await res.json();
 }
