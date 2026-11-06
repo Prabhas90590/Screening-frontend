@@ -17,6 +17,7 @@ from jose import JWTError
 from app.core.security import (
     create_access_token,
     decode_access_token,
+    hash_password,
     is_session_active,
     verify_password,
 )
@@ -27,7 +28,6 @@ from app.services.email_service import email_service
 logger = logging.getLogger("app.services.auth")
 
 ALLOWED_CORPORATE_DOMAIN = "@zeniusit.com"
-HARDCODED_CORPORATE_OTP = "123456"
 
 # Extracts "Authorization: Bearer <token>" from request headers.
 http_bearer = HTTPBearer(auto_error=True)
@@ -78,6 +78,14 @@ def authenticate_user(email: str, password: str) -> AuthResult:
     clean_email = email.lower().strip()
     user = user_repository.get_by_email(clean_email)
     if user is None:
+        # Check if user has an unverified pending registration
+        pending = user_repository.get_pending_registration(clean_email)
+        if pending and verify_password(password, pending.hashed_password):
+            logger.warning(f"Login attempt for pending unverified account: '{clean_email}'")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Corporate email is not verified yet. Please enter the 6-digit verification code sent to your inbox to complete registration.",
+            )
         logger.warning(f"Login attempt for unknown email: '{clean_email}'")
         raise _credentials_error
 
@@ -120,11 +128,10 @@ def register_user(
 ) -> SignupInitiatedResult:
     """Initiate registration for a corporate @zeniusit.com account.
 
-    1. Enforces corporate domain @zeniusit.com.
-    2. Validates password strength (min 8 chars, letters and digits).
-    3. Generates a random, cryptographically secure 6-digit OTP code valid for 15 minutes.
-    4. Creates the account in an unverified state (is_verified = False).
-    5. Dispatches verification code via actual email.
+    Architectural Invariant:
+    The user account is NOT stored in the 'users' table until email ownership is
+    confirmed via the random 6-digit OTP code. Pending registration data is held
+    in 'pending_registrations' with a 15-minute expiration.
     """
     clean_email = email.lower().strip()
 
@@ -140,114 +147,132 @@ def register_user(
             detail="Password must be at least 8 characters long.",
         )
 
-    # Check if already registered
-    existing_user = user_repository.get_by_email(clean_email)
-    if existing_user:
-        if existing_user.is_verified:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="An account with this email address already exists. Please sign in.",
-            )
-        # If registered but unverified, refresh the verification code and resend via email
-        code = HARDCODED_CORPORATE_OTP
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
-        user_repository.set_verification_code(clean_email, code, expires_at)
-        email_service.send_verification_email(clean_email, code, existing_user.full_name)
-        return SignupInitiatedResult(
-            email=clean_email,
-            message="A verification code has been sent to your corporate email. Please check your inbox (and Junk/Spam folder).",
-        )
-
-    # Standard hardcoded corporate OTP associated with user
-    code = HARDCODED_CORPORATE_OTP
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
-
-    try:
-        user = user_repository.create_user(
-            email=clean_email,
-            plain_password=password,
-            full_name=full_name,
-            verification_code=code,
-            verification_expires_at=expires_at,
-            is_verified=False,
-        )
-    except ValueError as e:
+    # Check if already registered in verified users table
+    if user_repository.email_exists(clean_email):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
-    except Exception as e:
-        logger.error(f"Failed to create account for '{clean_email}': {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not create user account. Please try again later.",
+            detail="An account with this email address already exists. Please sign in.",
         )
 
-    # Send actual email to corporate address
+    # Cryptographically secure random 6-digit OTP valid for 15 minutes
+    code = f"{secrets.randbelow(900000) + 100000}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+    hashed = hash_password(password)
+
+    # Store in pending_registrations ONLY (users table is NOT touched)
+    saved = user_repository.save_pending_registration(
+        email=clean_email,
+        hashed_password=hashed,
+        full_name=full_name,
+        verification_code=code,
+        expires_at=expires_at,
+    )
+    if not saved:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not initiate registration. Please try again later.",
+        )
+
+    # Dispatch actual email via live SMTP
     email_service.send_verification_email(clean_email, code, full_name)
-    logger.info(f"Initiated account registration for '{clean_email}'. Dispatched OTP code via email.")
+    logger.info(
+        f"[Auth] Initiated registration for '{clean_email}'. Random OTP {code} generated and dispatched. User NOT stored in 'users' table until verified."
+    )
 
     return SignupInitiatedResult(
         email=clean_email,
-        message=f"Verification code sent to {clean_email}. Please check your inbox (and Junk/Spam folder) to activate your account.",
+        message=f"Verification code sent to {clean_email}. Please check your corporate inbox (and Junk/Spam folder).",
     )
 
 
 def verify_user_email(email: str, code: str) -> AuthResult:
-    """Verify 6-digit email activation code and issue a JWT access token upon success."""
+    """Verify 6-digit email activation code.
+
+    ONLY UPON SUCCESSFUL VERIFICATION is the user permanently persisted
+    into the PostgreSQL 'users' table, and an active session JWT established.
+    """
     clean_email = email.lower().strip()
     clean_code = code.strip()
 
-    user = user_repository.get_by_email(clean_email)
-    if not user:
+    # If user is already verified and stored in users
+    existing_user = user_repository.get_by_email(clean_email)
+    if existing_user and existing_user.is_verified:
+        token = create_access_token(user_id=existing_user.id, email=existing_user.email, full_name=existing_user.full_name)
+        return AuthResult(user=existing_user, access_token=token)
+
+    pending = user_repository.get_pending_registration(clean_email)
+    if pending is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User account not found. Please register first.",
+            detail="No pending registration found for this email address. Please register first.",
         )
 
-    if user.is_verified:
-        token = create_access_token(user_id=user.id, email=user.email, full_name=user.full_name)
-        return AuthResult(user=user, access_token=token)
-
-    success = user_repository.verify_email(clean_email, clean_code)
-    if not success and clean_code != HARDCODED_CORPORATE_OTP:
+    if pending.verification_code.strip() != clean_code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification code. Please request a new code.",
+            detail="Invalid verification code. Please check your corporate email or click 'Resend Code'.",
         )
 
-    # Re-fetch the verified user record
-    verified_user = user_repository.get_by_email(clean_email)
+    now = datetime.now(timezone.utc)
+    if pending.expires_at < now:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code has expired. Please request a new code.",
+        )
+
+    # VERIFICATION CONFIRMED: Store user in 'users' table ONLY NOW
+    try:
+        user = user_repository.create_verified_user(
+            email=clean_email,
+            hashed_password=pending.hashed_password,
+            full_name=pending.full_name,
+        )
+        user_repository.delete_pending_registration(clean_email)
+    except Exception as e:
+        logger.error(f"Failed to persist verified user for '{clean_email}': {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not finalize account creation. Please try again.",
+        )
+
     token = create_access_token(
-        user_id=verified_user.id,
-        email=verified_user.email,
-        full_name=verified_user.full_name,
+        user_id=user.id,
+        email=user.email,
+        full_name=user.full_name,
     )
-    logger.info(f"Corporate email verified for '{clean_email}'. Session established.")
-    return AuthResult(user=verified_user, access_token=token)
+    logger.info(f"[Auth] Corporate email verified! User permanently stored in database: '{clean_email}' (id={user.id})")
+    return AuthResult(user=user, access_token=token)
 
 
 def resend_verification_code(email: str) -> None:
-    """Dispatch corporate activation code via email."""
+    """Generate and dispatch a fresh random 6-digit activation code via email."""
     clean_email = email.lower().strip()
-    user = user_repository.get_by_email(clean_email)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No account found with this email address.",
-        )
 
-    if user.is_verified:
+    if user_repository.email_exists(clean_email):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This account is already verified. You can sign in directly.",
         )
 
-    code = HARDCODED_CORPORATE_OTP
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
-    user_repository.set_verification_code(clean_email, code, expires_at)
-    email_service.send_verification_email(clean_email, code, user.full_name)
-    logger.info(f"Resent verification code for '{clean_email}'.")
+    pending = user_repository.get_pending_registration(clean_email)
+    if not pending:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No pending registration found for this email address. Please register first.",
+        )
+
+    # Fresh random 6-digit OTP
+    code = f"{secrets.randbelow(900000) + 100000}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+    user_repository.save_pending_registration(
+        email=clean_email,
+        hashed_password=pending.hashed_password,
+        full_name=pending.full_name,
+        verification_code=code,
+        expires_at=expires_at,
+    )
+    email_service.send_verification_email(clean_email, code, pending.full_name)
+    logger.info(f"[Auth] Resent fresh random verification code {code} for '{clean_email}'.")
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +280,7 @@ def resend_verification_code(email: str) -> None:
 # ---------------------------------------------------------------------------
 
 def request_password_reset(email: str) -> None:
-    """Dispatch corporate password reset authorization code to the user's email."""
+    """Dispatch random 6-digit password reset authorization code to the user's email."""
     clean_email = email.lower().strip()
 
     if not clean_email.endswith(ALLOWED_CORPORATE_DOMAIN):
@@ -267,11 +292,11 @@ def request_password_reset(email: str) -> None:
         logger.info(f"Password reset requested for non-existent/inactive email: '{clean_email}'")
         return
 
-    code = HARDCODED_CORPORATE_OTP
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+    code = f"{secrets.randbelow(900000) + 100000}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
     user_repository.set_reset_token(clean_email, code, expires_at)
     email_service.send_password_reset_email(clean_email, code, user.full_name)
-    logger.info(f"Password reset code generated and dispatched for '{clean_email}'.")
+    logger.info(f"[Auth] Password reset random OTP {code} generated and dispatched for '{clean_email}'.")
 
 
 def complete_password_reset(email: str, code: str, new_password: str) -> None:
@@ -287,16 +312,13 @@ def complete_password_reset(email: str, code: str, new_password: str) -> None:
         )
 
     success = user_repository.reset_password_with_token(clean_email, clean_code, new_password)
-    if not success and clean_code != HARDCODED_CORPORATE_OTP:
+    if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset authorization code. Please request a new one.",
         )
-    elif not success and clean_code == HARDCODED_CORPORATE_OTP:
-        # Fallback to direct update if hardcoded code used
-        user_repository.update_password(user.id, new_password)
 
-    logger.info(f"Password reset successful for user '{clean_email}'.")
+    logger.info(f"[Auth] Password reset successful for user '{clean_email}'.")
 
 
 def change_authenticated_password(

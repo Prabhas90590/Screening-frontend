@@ -31,3 +31,17 @@ class UserRecord(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PendingRegistrationRecord(BaseModel):
+    """Database model for 'pending_registrations' prior to OTP verification."""
+
+    email: str = Field(..., description="Corporate email awaiting OTP confirmation")
+    hashed_password: str = Field(..., description="bcrypt hash of password")
+    full_name: Optional[str] = Field(None, description="Full name of analyst")
+    verification_code: str = Field(..., description="Random 6-digit OTP code")
+    expires_at: datetime = Field(..., description="Expiration timestamp for OTP (15 mins)")
+    created_at: datetime = Field(default_factory=datetime.utcnow, description="Registration attempt timestamp")
+
+    class Config:
+        from_attributes = True

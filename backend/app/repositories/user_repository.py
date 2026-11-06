@@ -11,7 +11,7 @@ import uuid
 
 from app.core.security import hash_password
 from app.db.connection import db_manager
-from app.models.user import UserRecord
+from app.models.user import PendingRegistrationRecord, UserRecord
 
 logger = logging.getLogger("app.repositories.user")
 
@@ -176,6 +176,125 @@ class UserRepository:
             created_by_email=created_by_email,
         )
 
+    def save_pending_registration(
+        self,
+        email: str,
+        hashed_password: str,
+        full_name: Optional[str],
+        verification_code: str,
+        expires_at: datetime,
+    ) -> bool:
+        """Store or update a pending registration awaiting OTP verification."""
+        clean_email = email.lower().strip()
+        conn = db_manager.get_connection()
+        now = datetime.now(timezone.utc)
+        try:
+            cur = conn.cursor()
+            sql = (
+                "INSERT INTO pending_registrations "
+                "(email, hashed_password, full_name, verification_code, expires_at, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (email) DO UPDATE SET "
+                "hashed_password = EXCLUDED.hashed_password, "
+                "full_name = EXCLUDED.full_name, "
+                "verification_code = EXCLUDED.verification_code, "
+                "expires_at = EXCLUDED.expires_at, "
+                "created_at = EXCLUDED.created_at;"
+            )
+            cur.execute(sql, (clean_email, hashed_password, full_name, verification_code, expires_at, now))
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"save_pending_registration failed for '{clean_email}': {e}")
+            return False
+        finally:
+            conn.close()
+
+    def get_pending_registration(self, email: str) -> Optional[PendingRegistrationRecord]:
+        """Fetch pending registration record if exists."""
+        clean_email = email.lower().strip()
+        conn = db_manager.get_connection()
+        try:
+            cur = conn.cursor()
+            sql = (
+                "SELECT email, hashed_password, full_name, verification_code, expires_at, created_at "
+                "FROM pending_registrations WHERE LOWER(email) = LOWER(%s);"
+            )
+            cur.execute(sql, (clean_email,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            return PendingRegistrationRecord(
+                email=row[0],
+                hashed_password=row[1],
+                full_name=row[2],
+                verification_code=row[3],
+                expires_at=row[4],
+                created_at=row[5],
+            )
+        except Exception as e:
+            logger.error(f"get_pending_registration failed for '{clean_email}': {e}")
+            return None
+        finally:
+            conn.close()
+
+    def delete_pending_registration(self, email: str) -> bool:
+        """Remove pending registration upon successful activation or cancellation."""
+        clean_email = email.lower().strip()
+        conn = db_manager.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM pending_registrations WHERE LOWER(email) = LOWER(%s);", (clean_email,))
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"delete_pending_registration failed for '{clean_email}': {e}")
+            return False
+        finally:
+            conn.close()
+
+    def create_verified_user(
+        self,
+        email: str,
+        hashed_password: str,
+        full_name: Optional[str] = None,
+    ) -> UserRecord:
+        """Store verified user in PostgreSQL 'users' table ONLY AFTER OTP validation."""
+        clean_email = email.lower().strip()
+        user_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+
+        conn = db_manager.get_connection()
+        try:
+            cur = conn.cursor()
+            sql = (
+                "INSERT INTO users "
+                "(id, email, hashed_password, full_name, is_active, is_verified, created_at, updated_at) "
+                "VALUES (%s, %s, %s, %s, TRUE, TRUE, %s, %s);"
+            )
+            cur.execute(sql, (user_id, clean_email, hashed_password, full_name, now, now))
+            conn.commit()
+            logger.info(f"Stored verified user account: '{clean_email}' (id={user_id})")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"create_verified_user failed for '{clean_email}': {e}")
+            raise RuntimeError(f"Could not persist verified user account: {e}") from e
+        finally:
+            conn.close()
+
+        return UserRecord(
+            id=user_id,
+            email=clean_email,
+            hashed_password=hashed_password,
+            full_name=full_name,
+            is_active=True,
+            is_verified=True,
+            created_at=now,
+            updated_at=now,
+        )
+
     def set_verification_code(self, email: str, code: str, expires_at: datetime) -> bool:
         """Assign or update a 6-digit email verification code for an account."""
         conn = db_manager.get_connection()
@@ -205,7 +324,7 @@ class UserRepository:
         if user.is_verified:
             return True
 
-        matches_code = (user.verification_code and user.verification_code.strip() == code.strip()) or (code.strip() == "123456")
+        matches_code = bool(user.verification_code and user.verification_code.strip() == code.strip())
         if not matches_code:
             return False
 
@@ -258,7 +377,7 @@ class UserRepository:
         if not user or not user.reset_token:
             return False
 
-        matches_token = (user.reset_token and user.reset_token.strip() == token.strip()) or (token.strip() == "123456")
+        matches_token = bool(user.reset_token and user.reset_token.strip() == token.strip())
         if not matches_token:
             return False
 

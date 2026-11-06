@@ -505,6 +505,17 @@ CREATE TABLE IF NOT EXISTS users (
     created_by_email        VARCHAR(255)
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- Auth: Pending registrations table (stored only until corporate OTP verification)
+CREATE TABLE IF NOT EXISTS pending_registrations (
+    email                   VARCHAR(255) PRIMARY KEY,
+    hashed_password         VARCHAR(255) NOT NULL,
+    full_name               VARCHAR(255),
+    verification_code       VARCHAR(64) NOT NULL,
+    expires_at              TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pending_reg_email ON pending_registrations(email);
 """
 
 class PooledConnectionWrapper:
