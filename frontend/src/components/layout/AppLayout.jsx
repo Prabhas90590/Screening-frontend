@@ -2,6 +2,7 @@ import React from 'react';
 import { useScreening } from '../../context/ScreeningContext';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { UserProfileModal } from '../auth/UserProfileModal';
 
 export const AppLayout = ({ children }) => {
   const { activeNav } = useScreening();
@@ -15,6 +16,7 @@ export const AppLayout = ({ children }) => {
           {children}
         </main>
       </div>
+      <UserProfileModal />
     </div>
   );
 };

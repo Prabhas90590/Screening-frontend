@@ -490,14 +490,19 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_type ON audit_events(event_type, cre
 
 -- Auth: User accounts table (Phase 1 - user-side login)
 CREATE TABLE IF NOT EXISTS users (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email            VARCHAR(255) NOT NULL UNIQUE,
-    hashed_password  VARCHAR(255) NOT NULL,
-    full_name        VARCHAR(255),
-    is_active        BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_by_email VARCHAR(255)
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email                   VARCHAR(255) NOT NULL UNIQUE,
+    hashed_password         VARCHAR(255) NOT NULL,
+    full_name               VARCHAR(255),
+    is_active               BOOLEAN NOT NULL DEFAULT TRUE,
+    is_verified             BOOLEAN NOT NULL DEFAULT FALSE,
+    verification_code       VARCHAR(64),
+    verification_expires_at TIMESTAMP WITH TIME ZONE,
+    reset_token             VARCHAR(64),
+    reset_expires_at        TIMESTAMP WITH TIME ZONE,
+    created_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_email        VARCHAR(255)
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 """
@@ -662,6 +667,11 @@ class DatabaseManager:
             cursor.execute("ALTER TABLE decisions ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255);")
             cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);")
             cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255);")
+            cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;")
+            cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code VARCHAR(64);")
+            cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires_at TIMESTAMP WITH TIME ZONE;")
+            cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(64);")
+            cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires_at TIMESTAMP WITH TIME ZONE;")
             # Backfill unassigned legacy work dynamically to the primary registered user in the database
             cursor.execute("SELECT id, email FROM users ORDER BY created_at ASC LIMIT 1;")
             primary_user = cursor.fetchone()

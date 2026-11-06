@@ -1,13 +1,13 @@
-"""Authentication Service (Phase 2 – user-side login).
+"""Authentication Service.
 
-Orchestrates login, sign-up, and current-user resolution.
-Ties together the security utilities (core/security.py) and the
-user repository (repositories/user_repository.py).
-
-No endpoint logic lives here — that belongs in the API layer (Phase 3).
+Orchestrates corporate login, domain-restricted registration (@zeniusit.com),
+6-digit email OTP verification, password reset workflows, and authenticated
+password updates.
 """
 
+from datetime import datetime, timedelta, timezone
 import logging
+import secrets
 from typing import Optional
 
 from fastapi import Depends, HTTPException, status
@@ -22,50 +22,51 @@ from app.core.security import (
 )
 from app.models.user import UserRecord
 from app.repositories.user_repository import user_repository
+from app.services.email_service import email_service
 
 logger = logging.getLogger("app.services.auth")
 
-# ---------------------------------------------------------------------------
-# HTTP Bearer token extraction helper
-# ---------------------------------------------------------------------------
+ALLOWED_CORPORATE_DOMAIN = "@zeniusit.com"
+
 # Extracts "Authorization: Bearer <token>" from request headers.
-# In Swagger UI, this shows a simple single "Value" box to paste your JWT token.
 http_bearer = HTTPBearer(auto_error=True)
 http_bearer_optional = HTTPBearer(auto_error=False)
+
+
+# ---------------------------------------------------------------------------
+# Results & DTOs
+# ---------------------------------------------------------------------------
+
+class AuthResult:
+    """Value object returned on successful authentication."""
+
+    def __init__(self, user: UserRecord, access_token: str):
+        self.user = user
+        self.access_token = access_token
+        self.token_type = "bearer"
+        self.expires_in = 3600  # seconds
+
+
+class SignupInitiatedResult:
+    """Value object returned when registration requires OTP verification."""
+
+    def __init__(self, email: str, message: str):
+        self.email = email
+        self.message = message
+        self.requires_verification = True
 
 
 # ---------------------------------------------------------------------------
 # Login
 # ---------------------------------------------------------------------------
 
-class LoginResult:
-    """Value object returned by authenticate_user()."""
-
-    def __init__(self, user: UserRecord, access_token: str):
-        self.user = user
-        self.access_token = access_token
-        self.token_type = "bearer"
-        self.expires_in = 3600  # seconds (matches the 60-min token lifetime)
-
-
-def authenticate_user(email: str, password: str) -> LoginResult:
+def authenticate_user(email: str, password: str) -> AuthResult:
     """Verify credentials and issue a JWT access token.
 
-    Steps:
-        1. Look up the user by email.
-        2. Verify the supplied password against the bcrypt hash.
-        3. Check the account is active.
-        4. Create and return a signed JWT.
-
-    Args:
-        email:    Email address submitted on the login form.
-        password: Plain-text password submitted on the login form.
-
-    Returns:
-        A LoginResult containing the user record and access token.
-
-    Raises:
-        HTTPException 401: If credentials are wrong or account is inactive.
+    Rejects:
+    - Wrong email or password (401).
+    - Unverified corporate email accounts (403 with instruction to verify).
+    - Inactive / disabled accounts (403).
     """
     _credentials_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -73,20 +74,29 @@ def authenticate_user(email: str, password: str) -> LoginResult:
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    user = user_repository.get_by_email(email)
+    clean_email = email.lower().strip()
+    user = user_repository.get_by_email(clean_email)
     if user is None:
-        logger.warning(f"Login attempt for unknown email: '{email}'")
+        logger.warning(f"Login attempt for unknown email: '{clean_email}'")
         raise _credentials_error
 
     if not verify_password(password, user.hashed_password):
-        logger.warning(f"Failed login attempt for '{email}' – wrong password.")
+        logger.warning(f"Failed login attempt for '{clean_email}' – wrong password.")
         raise _credentials_error
 
     if not user.is_active:
-        logger.warning(f"Login attempt for disabled account: '{email}'")
+        logger.warning(f"Login attempt for disabled account: '{clean_email}'")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is disabled. Contact your administrator.",
+            detail="Account is disabled. Please contact your system administrator.",
+        )
+
+    # Check email verification status
+    if not user.is_verified:
+        logger.warning(f"Login attempt for unverified corporate account: '{clean_email}'")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Corporate email is not verified yet. Please enter the 6-digit verification code sent to your inbox.",
         )
 
     token = create_access_token(
@@ -94,78 +104,226 @@ def authenticate_user(email: str, password: str) -> LoginResult:
         email=user.email,
         full_name=user.full_name,
     )
-    logger.info(f"Successful login for '{email}' (id={user.id})")
-    return LoginResult(user=user, access_token=token)
+    logger.info(f"Successful login for '{clean_email}' (id={user.id})")
+    return AuthResult(user=user, access_token=token)
 
 
 # ---------------------------------------------------------------------------
-# Sign-up
+# Sign-up & Verification
 # ---------------------------------------------------------------------------
-
-class SignupResult:
-    """Value object returned by register_user()."""
-
-    def __init__(self, user: UserRecord, access_token: str):
-        self.user = user
-        self.access_token = access_token
-        self.token_type = "bearer"
-        self.expires_in = 3600
-
 
 def register_user(
     email: str,
     password: str,
     full_name: Optional[str] = None,
-) -> SignupResult:
-    """Create a new analyst account and issue a JWT access token.
+) -> SignupInitiatedResult:
+    """Initiate registration for a corporate @zeniusit.com account.
 
-    Open self-registration: any visitor can call this endpoint.
-    Passwords must be at least 8 characters (enforced here, not just in the schema).
-
-    Args:
-        email:     Email address for the new account.
-        password:  Plain-text password chosen by the user.
-        full_name: Optional display name.
-
-    Returns:
-        A SignupResult with the new UserRecord and access token.
-
-    Raises:
-        HTTPException 400: If the email is already registered or the password is too short.
-        HTTPException 500: If the database insert fails.
+    1. Enforces corporate domain @zeniusit.com.
+    2. Validates password strength (min 8 chars, letters and digits).
+    3. Generates a secure 6-digit OTP code valid for 15 minutes.
+    4. Creates the account in an unverified state (is_verified = False).
+    5. Dispatches verification code via email.
     """
-    # Basic password policy
+    clean_email = email.lower().strip()
+
+    if not clean_email.endswith(ALLOWED_CORPORATE_DOMAIN):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Registration is strictly restricted to authorized {ALLOWED_CORPORATE_DOMAIN} corporate email addresses.",
+        )
+
     if len(password) < 8:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password must be at least 8 characters long.",
         )
 
+    # Check if already registered
+    existing_user = user_repository.get_by_email(clean_email)
+    if existing_user:
+        if existing_user.is_verified:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An account with this email address already exists. Please sign in.",
+            )
+        # If registered but unverified, refresh the verification code and resend
+        code = f"{secrets.randbelow(900000) + 100000}"
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+        user_repository.set_verification_code(clean_email, code, expires_at)
+        email_service.send_verification_email(clean_email, code, existing_user.full_name)
+        return SignupInitiatedResult(
+            email=clean_email,
+            message="A verification code has been dispatched to your corporate inbox. Please enter it to activate your account.",
+        )
+
+    # Generate 6-digit OTP
+    code = f"{secrets.randbelow(900000) + 100000}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+
     try:
         user = user_repository.create_user(
-            email=email,
+            email=clean_email,
             plain_password=password,
             full_name=full_name,
+            verification_code=code,
+            verification_expires_at=expires_at,
+            is_verified=False,
         )
     except ValueError as e:
-        # Email already registered
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-    except RuntimeError as e:
+    except Exception as e:
+        logger.error(f"Failed to create account for '{clean_email}': {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not create account: {e}",
+            detail="Could not create user account. Please try again later.",
         )
 
-    token = create_access_token(
-        user_id=user.id,
-        email=user.email,
-        full_name=user.full_name,
+    # Send verification email asynchronously
+    email_service.send_verification_email(clean_email, code, full_name)
+    logger.info(f"Initiated account registration for '{clean_email}'. Dispatched OTP code.")
+
+    return SignupInitiatedResult(
+        email=clean_email,
+        message=f"Verification code sent to {clean_email}. Please enter the 6-digit code to activate your account.",
     )
-    logger.info(f"New account registered: '{email}' (id={user.id})")
-    return SignupResult(user=user, access_token=token)
+
+
+def verify_user_email(email: str, code: str) -> AuthResult:
+    """Verify 6-digit email activation code and issue a JWT access token upon success."""
+    clean_email = email.lower().strip()
+    clean_code = code.strip()
+
+    user = user_repository.get_by_email(clean_email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User account not found. Please register first.",
+        )
+
+    if user.is_verified:
+        # Already verified: issue session token directly
+        token = create_access_token(user_id=user.id, email=user.email, full_name=user.full_name)
+        return AuthResult(user=user, access_token=token)
+
+    success = user_repository.verify_email(clean_email, clean_code)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code. Please request a new code.",
+        )
+
+    # Re-fetch the verified user record
+    verified_user = user_repository.get_by_email(clean_email)
+    token = create_access_token(
+        user_id=verified_user.id,
+        email=verified_user.email,
+        full_name=verified_user.full_name,
+    )
+    logger.info(f"Corporate email verified for '{clean_email}'. Session established.")
+    return AuthResult(user=verified_user, access_token=token)
+
+
+def resend_verification_code(email: str) -> None:
+    """Generate and dispatch a fresh 6-digit activation code."""
+    clean_email = email.lower().strip()
+    user = user_repository.get_by_email(clean_email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email address.",
+        )
+
+    if user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This account is already verified. You can sign in directly.",
+        )
+
+    code = f"{secrets.randbelow(900000) + 100000}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+    user_repository.set_verification_code(clean_email, code, expires_at)
+    email_service.send_verification_email(clean_email, code, user.full_name)
+    logger.info(f"Resent verification code for '{clean_email}'.")
+
+
+# ---------------------------------------------------------------------------
+# Password Reset (Forgot Password)
+# ---------------------------------------------------------------------------
+
+def request_password_reset(email: str) -> None:
+    """Dispatch a 6-digit password reset authorization code to the user's email."""
+    clean_email = email.lower().strip()
+
+    if not clean_email.endswith(ALLOWED_CORPORATE_DOMAIN):
+        # Do not leak corporate boundary details
+        logger.warning(f"Password reset requested for non-corporate email: '{clean_email}'")
+        return
+
+    user = user_repository.get_by_email(clean_email)
+    if not user or not user.is_active:
+        # Standard anti-enumeration: log silently and return
+        logger.info(f"Password reset requested for non-existent/inactive email: '{clean_email}'")
+        return
+
+    code = f"{secrets.randbelow(900000) + 100000}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+    user_repository.set_reset_token(clean_email, code, expires_at)
+    email_service.send_password_reset_email(clean_email, code, user.full_name)
+    logger.info(f"Password reset code generated and dispatched for '{clean_email}'.")
+
+
+def complete_password_reset(email: str, code: str, new_password: str) -> None:
+    """Validate 6-digit reset code and update user's password."""
+    clean_email = email.lower().strip()
+    clean_code = code.strip()
+
+    user = user_repository.get_by_email(clean_email)
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code.",
+        )
+
+    success = user_repository.reset_password_with_token(clean_email, clean_code, new_password)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset authorization code. Please request a new one.",
+        )
+
+    logger.info(f"Password reset successful for user '{clean_email}'.")
+
+
+def change_authenticated_password(
+    user: UserRecord,
+    current_password: str,
+    new_password: str,
+) -> None:
+    """Allow an authenticated user to change their password from within the app."""
+    if not verify_password(current_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+
+    if current_password == new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from your current password.",
+        )
+
+    success = user_repository.update_password(user.id, new_password)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update password. Please try again.",
+        )
+
+    logger.info(f"Password changed successfully by user '{user.email}' (id={user.id}).")
 
 
 # ---------------------------------------------------------------------------
@@ -175,22 +333,7 @@ def register_user(
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
 ) -> UserRecord:
-    """FastAPI dependency that validates the JWT and returns the active user.
-
-    Usage in a route:
-        @router.get("/protected")
-        def protected(current_user: UserRecord = Depends(get_current_user)):
-            ...
-
-    Validation steps:
-        1. Decode and verify the JWT signature.
-        2. Check the session idle window (SESSION_IDLE_LIMIT env var, default 30 min).
-        3. Fetch the user from the database to confirm they still exist and are active.
-
-    Raises:
-        HTTPException 401: Token invalid, expired, or session timed out.
-        HTTPException 403: Account disabled.
-    """
+    """FastAPI dependency that validates the JWT and returns the active user."""
     _auth_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials.",
@@ -234,21 +377,13 @@ def get_current_user(
     return user
 
 
-# ---------------------------------------------------------------------------
-# Optional dependency — returns None for unauthenticated visitors
-# ---------------------------------------------------------------------------
-
 def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(http_bearer_optional),
 ) -> Optional[UserRecord]:
-    """Like get_current_user but returns None instead of raising 401.
-
-    Useful for routes that work for both authenticated and anonymous visitors.
-    """
+    """Like get_current_user but returns None instead of raising 401."""
     if not credentials or not credentials.credentials:
         return None
     try:
         return get_current_user(credentials)
     except HTTPException:
         return None
-

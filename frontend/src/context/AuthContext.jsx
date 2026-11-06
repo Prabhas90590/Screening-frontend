@@ -1,21 +1,29 @@
 /**
- * Authentication Context (Phase 5).
+ * Authentication Context.
  *
- * Central state and session management for the entire React application:
+ * Central state and session management for Zenius ScreenPro:
  * - Persistent sessions via localStorage ('access_token').
  * - Automatic user profile hydration on page reload (GET /api/auth/me).
  * - Human activity tracking (mouse, typing, scroll, clicks) with a 30-minute idle lock.
  * - Background keep-alive heartbeat (POST /api/auth/ping) while actively working.
- * - Exposes login, signup, and logout functions globally.
+ * - Corporate domain email verification (@zeniusit.com) via 6-digit OTP.
+ * - Forgot password and authenticated password change handlers.
+ * - Global modal state for user profile details & password management.
  */
 
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import {
+  changePasswordApi,
   fetchMeApi,
+  forgotPasswordApi,
   loginApi,
   logoutApi,
   pingSessionApi,
+  resendVerificationApi,
+  resetPasswordApi,
   signupApi,
+  updateProfileApi,
+  verifyEmailApi,
 } from '../services/api';
 
 const AuthContext = createContext(null);
@@ -32,6 +40,7 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
   const [sessionTimedOut, setSessionTimedOut] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   // References for tracking human activity & ping scheduling without re-triggering renders
   const lastActivityRef = useRef(Date.now());
@@ -60,6 +69,7 @@ export function AuthProvider({ children }) {
     } catch {}
     setToken(null);
     setUser(null);
+    setIsProfileModalOpen(false);
 
     // Transition URL to /login
     if (window.location.pathname !== '/login') {
@@ -100,7 +110,6 @@ export function AuthProvider({ children }) {
         }
       } catch (err) {
         console.warn('[Auth] Session rehydration check:', err.message);
-        // Only evict the token if the server explicitly rejected credentials (401 / 403)
         if (err.status === 401 || err.status === 403) {
           localStorage.removeItem('access_token');
           if (isMounted) {
@@ -116,7 +125,6 @@ export function AuthProvider({ children }) {
             const nowUnix = Math.floor(Date.now() / 1000);
 
             if (payload.exp && payload.exp < nowUnix) {
-              // Token genuinely expired by timestamp
               localStorage.removeItem('access_token');
               if (isMounted) {
                 setUser(null);
@@ -127,6 +135,7 @@ export function AuthProvider({ children }) {
                 id: payload.sub,
                 email: payload.email,
                 full_name: payload.name || payload.email.split('@')[0],
+                is_verified: true,
               });
               setToken(savedToken);
               lastActivityRef.current = Date.now();
@@ -153,17 +162,15 @@ export function AuthProvider({ children }) {
   }, []);
 
   // -------------------------------------------------------------------------
-  // 3. Human Inactivity Tracking (Mouse, Keyboard, Clicks, Scrolling)
+  // 3. Human Inactivity Tracking
   // -------------------------------------------------------------------------
   useEffect(() => {
-    // Only track activity when a user is actively authenticated
     if (!token || !user) return;
 
     let throttleTimer = null;
 
     const handleHumanInteraction = () => {
       const now = Date.now();
-      // Throttle timestamp updates to at most once every 1 second
       if (!throttleTimer) {
         lastActivityRef.current = now;
         throttleTimer = setTimeout(() => {
@@ -172,24 +179,20 @@ export function AuthProvider({ children }) {
       }
     };
 
-    // Attach listeners for any physical user input (including client-side Keep/Drop, drawers, scrolling)
     const monitoredEvents = ['mousedown', 'keydown', 'scroll', 'touchstart', 'mousemove', 'click'];
     monitoredEvents.forEach((eventName) => {
       window.addEventListener(eventName, handleHumanInteraction, { passive: true });
     });
 
-    // Inactivity checker loop: runs every 10 seconds
     const intervalId = setInterval(() => {
       const now = Date.now();
       const idleTime = now - lastActivityRef.current;
 
-      // Check if 30 minutes of complete inactivity have elapsed
       if (idleTime >= INACTIVITY_TIMEOUT_MS) {
         logout('inactivity');
         return;
       }
 
-      // Check if it's time for a background keep-alive ping (every 5 minutes of active usage)
       if (now - lastPingRef.current >= PING_INTERVAL_MS) {
         lastPingRef.current = now;
         pingSessionApi(token).catch((err) => {
@@ -245,24 +248,32 @@ export function AuthProvider({ children }) {
   };
 
   // -------------------------------------------------------------------------
-  // 5. Sign-Up Function
+  // 5. Sign-Up Function (Dispatches 6-digit corporate verification OTP)
   // -------------------------------------------------------------------------
   const signup = async (email, password, fullName = '') => {
     setAuthError(null);
     setSessionTimedOut(false);
     try {
       const res = await signupApi(email, password, fullName);
+      return {
+        requiresVerification: true,
+        email: res.email,
+        message: res.message,
+      };
+    } catch (err) {
+      setAuthError(err.message || 'Sign-up failed');
+      throw err;
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 6. Verify Email OTP Code
+  // -------------------------------------------------------------------------
+  const verifyEmail = async (email, code) => {
+    setAuthError(null);
+    try {
+      const res = await verifyEmailApi(email, code);
       if (res && res.access_token) {
-        try {
-          const keysToRemove = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && key.startsWith('screening_')) {
-              keysToRemove.push(key);
-            }
-          }
-          keysToRemove.forEach((k) => localStorage.removeItem(k));
-        } catch {}
         localStorage.setItem('access_token', res.access_token);
         setToken(res.access_token);
         setUser(res.user);
@@ -274,14 +285,78 @@ export function AuthProvider({ children }) {
         }
         return { success: true, user: res.user };
       }
-      throw new Error('No access token received from server');
+      throw new Error('Verification completed but no access token was returned.');
     } catch (err) {
-      setAuthError(err.message || 'Sign-up failed');
+      setAuthError(err.message || 'Email verification failed');
+      throw err;
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 7. Resend Verification Code
+  // -------------------------------------------------------------------------
+  const resendVerification = async (email) => {
+    setAuthError(null);
+    try {
+      return await resendVerificationApi(email);
+    } catch (err) {
+      setAuthError(err.message || 'Failed to resend verification code');
+      throw err;
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 8. Forgot Password & Reset Password
+  // -------------------------------------------------------------------------
+  const forgotPassword = async (email) => {
+    setAuthError(null);
+    try {
+      return await forgotPasswordApi(email);
+    } catch (err) {
+      setAuthError(err.message || 'Failed to request password reset');
+      throw err;
+    }
+  };
+
+  const resetPassword = async (email, code, newPassword) => {
+    setAuthError(null);
+    try {
+      return await resetPasswordApi(email, code, newPassword);
+    } catch (err) {
+      setAuthError(err.message || 'Failed to reset password');
+      throw err;
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 9. Change Password (Authenticated In-App)
+  // -------------------------------------------------------------------------
+  const changePassword = async (currentPassword, newPassword) => {
+    try {
+      return await changePasswordApi(currentPassword, newPassword);
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 10. Update Profile (Display Name)
+  // -------------------------------------------------------------------------
+  const updateProfile = async (fullName) => {
+    try {
+      const updated = await updateProfileApi(fullName);
+      if (updated) {
+        setUser((prev) => ({ ...prev, full_name: updated.full_name }));
+      }
+      return updated;
+    } catch (err) {
       throw err;
     }
   };
 
   const clearAuthError = () => setAuthError(null);
+  const openProfileModal = () => setIsProfileModalOpen(true);
+  const closeProfileModal = () => setIsProfileModalOpen(false);
 
   const value = {
     user,
@@ -290,8 +365,17 @@ export function AuthProvider({ children }) {
     isLoading,
     authError,
     sessionTimedOut,
+    isProfileModalOpen,
+    openProfileModal,
+    closeProfileModal,
     login,
     signup,
+    verifyEmail,
+    resendVerification,
+    forgotPassword,
+    resetPassword,
+    changePassword,
+    updateProfile,
     logout,
     clearAuthError,
   };

@@ -15,7 +15,7 @@ function getInitials(nameOrEmail) {
 
 export const Sidebar = () => {
   const { activeNav, setActiveNav } = useScreening();
-  const { user, logout } = useAuth();
+  const { user, logout, openProfileModal } = useAuth();
 
   const navItems = [
     { id: 'rules', label: 'Screening Rules' },
@@ -43,20 +43,19 @@ export const Sidebar = () => {
       </div>
 
       {/* Nav Items */}
-      <nav className="flex-1 space-y-0.5">
+      <nav className="flex-1 px-2 space-y-0.5">
         {navItems.map((item) => {
           const isActive = activeNav === item.id;
           return (
             <button
               key={item.id}
               onClick={() => setActiveNav(item.id)}
-              className={`w-full flex items-center px-4 py-2 text-[12px] text-left transition-colors relative ${
+              className={`w-full flex items-center px-3 py-1.5 text-xs font-semibold rounded-[4px] transition-colors cursor-pointer ${
                 isActive
-                  ? 'bg-[#1b3153] text-white font-bold border-l-2 border-[#e5a420]'
-                  : 'text-[#91a3bc] hover:text-white hover:bg-[#122641] font-medium border-l-2 border-transparent'
+                  ? 'bg-[#1b3153] text-white shadow-2xs'
+                  : 'text-[#8da0b6] hover:bg-[#13233a] hover:text-white'
               }`}
             >
-              {/* Square marker: Solid gold when active, solid steel-blue when inactive */}
               <span
                 className={`w-2 h-2 mr-2 shrink-0 rounded-[1px] transition-colors ${
                   isActive ? 'bg-[#e5a420]' : 'bg-[#365275]'
@@ -68,24 +67,29 @@ export const Sidebar = () => {
         })}
       </nav>
 
-      {/* Footer: User Profile Widget & Logout (Phase 8) */}
+      {/* Footer: User Profile Widget & Logout */}
       <div className="p-3 border-t border-[#1b3153] mt-auto bg-[#0a1626]">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2 min-w-0">
+          <button
+            type="button"
+            onClick={openProfileModal}
+            title="Click to view Analyst Profile & Reset Password"
+            className="flex items-center space-x-2 min-w-0 text-left hover:opacity-80 transition cursor-pointer flex-1"
+          >
             {/* Initials Avatar */}
             <div className="w-6 h-6 rounded-full bg-[#1b3153] border border-[#e5a420]/40 flex items-center justify-center text-[10px] font-bold text-[#e5a420] shrink-0">
               {getInitials(user?.full_name || user?.email)}
             </div>
             {/* User details */}
-            <div className="truncate">
+            <div className="truncate flex-1">
               <div className="text-[11px] font-semibold text-white truncate" title={user?.full_name || user?.email}>
                 {user?.full_name || user?.email?.split('@')[0] || 'Analyst'}
               </div>
               <div className="text-[9px] text-[#7186a2] truncate" title={user?.email}>
-                {user?.email || 'analyst@portal'}
+                {user?.email || 'analyst@zeniusit.com'}
               </div>
             </div>
-          </div>
+          </button>
 
           {/* Logout Button */}
           <button

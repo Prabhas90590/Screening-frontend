@@ -602,3 +602,88 @@ export async function logoutApi(token) {
     return { message: 'Logged out' };
   }
 }
+
+
+export async function verifyEmailApi(email, code) {
+  const res = await fetch(`${API_BASE}/auth/verify-email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Email verification failed.');
+  }
+  return await res.json();
+}
+
+export async function resendVerificationApi(email) {
+  const res = await fetch(`${API_BASE}/auth/resend-verification`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Failed to resend verification code.');
+  }
+  return await res.json();
+}
+
+export async function forgotPasswordApi(email) {
+  const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Failed to request password reset.');
+  }
+  return await res.json();
+}
+
+export async function resetPasswordApi(email, code, newPassword) {
+  const res = await fetch(`${API_BASE}/auth/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Password reset failed.');
+  }
+  return await res.json();
+}
+
+export async function changePasswordApi(currentPassword, newPassword) {
+  const authToken = getStoredAuthToken();
+  if (!authToken) throw new Error('Not authenticated');
+
+  const res = await fetch(`${API_BASE}/auth/change-password`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Failed to change password.');
+  }
+  return await res.json();
+}
+
+export async function updateProfileApi(fullName) {
+  const authToken = getStoredAuthToken();
+  if (!authToken) throw new Error('Not authenticated');
+
+  const res = await fetch(`${API_BASE}/auth/profile`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ full_name: fullName }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Failed to update profile.');
+  }
+  return await res.json();
+}

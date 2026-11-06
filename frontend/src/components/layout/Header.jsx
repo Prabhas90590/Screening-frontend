@@ -8,7 +8,7 @@ export const Header = () => {
     rulesTab,
     selectedProfileName,
   } = useScreening();
-  const { user } = useAuth();
+  const { user, openProfileModal } = useAuth();
 
   const getPageTitle = () => {
     switch (activeNav) {
@@ -33,12 +33,17 @@ export const Header = () => {
 
       {/* Top Right Cluster */}
       <div className="flex items-center space-x-3">
-        {/* User Status Badge */}
+        {/* User Status Badge (Click to open Profile & Password Modal) */}
         {user && (
-          <div className="flex items-center space-x-1.5 px-3 py-1 bg-white border border-slate-200 text-xs text-slate-700 font-medium rounded-full shadow-2xs">
+          <button
+            type="button"
+            onClick={openProfileModal}
+            title="Click to view Analyst Profile & Password Management"
+            className="flex items-center space-x-1.5 px-3 py-1 bg-white border border-slate-200 hover:border-[#147b73] hover:bg-[#f0f9f8] text-xs text-slate-700 font-medium rounded-full shadow-2xs transition cursor-pointer"
+          >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
             <span className="font-semibold text-slate-800">{user.full_name || user.email?.split('@')[0]}</span>
-          </div>
+          </button>
         )}
 
         {/* Profile Version Tag */}
