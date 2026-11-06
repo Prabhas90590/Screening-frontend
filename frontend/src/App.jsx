@@ -53,7 +53,7 @@ const ProtectedApp = () => {
       <div className="min-h-screen w-screen flex flex-col items-center justify-center bg-[#0a1120] text-slate-300 select-none">
         <div className="w-9 h-9 border-3 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4" />
         <span className="text-xs uppercase tracking-widest font-semibold text-slate-400">
-          Verifying Session...
+          Verifying Session · Zenius ScreenPro...
         </span>
       </div>
     );

@@ -28,10 +28,10 @@ export const Sidebar = () => {
       {/* Brand Header */}
       <div className="pt-4 px-4 pb-0 flex items-center space-x-2">
         {/* Solid Gold Rounded Logo Mark */}
-        <div className="w-[20px] h-[21px] rounded-[5px] bg-[#e5a420] shrink-0" />
+        <div className="w-[22px] h-[22px] rounded-[5px] bg-[#e5a420] shrink-0 flex items-center justify-center text-[#0d1c31] font-bold text-[11px] shadow-xs">Z</div>
         <div className="leading-[1.08]">
-          <div className="text-white text-[14px] font-serif font-bold tracking-tight">Portfolio</div>
-          <div className="text-white text-[14px] font-serif font-bold tracking-tight">Research</div>
+          <div className="text-white text-[13px] font-bold tracking-tight">Zenius</div>
+          <div className="text-[#e5a420] text-[13px] font-bold tracking-tight">ScreenPro</div>
         </div>
       </div>
 

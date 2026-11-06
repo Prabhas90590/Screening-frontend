@@ -1,12 +1,12 @@
 /**
- * Institutional Login & Self-Sign-Up Page (Phase 6).
+ * Zenius ScreenPro — Institutional Login & Analyst Registration Portal.
  *
- * Professional authentication portal for Equity Screening analysts:
- * - Dual-mode: Sign In & Open Self-Registration ("Create Account").
- * - Password visibility toggle (Show/Hide).
- * - Real-time client & server error alerts (with brute-force warning display).
- * - Automatic 30-minute inactivity session expiration banner.
- * - Loading spinners on submission.
+ * Professional, simple, and executive authentication interface:
+ * - Dual-mode: Sign In & Open Self-Registration.
+ * - Password visibility toggle.
+ * - Real-time client & server validation with clear error messaging.
+ * - Session timeout notification banner.
+ * - High-contrast institutional typography and gold accent branding.
  */
 
 import React, { useState } from 'react';
@@ -17,7 +17,6 @@ import {
   Eye,
   EyeOff,
   AlertCircle,
-  TrendingUp,
   ShieldCheck,
   Clock,
   ArrowRight,
@@ -82,9 +81,7 @@ export function LoginPage() {
       } else {
         await signup(email.trim(), password, fullName.trim());
       }
-      // Successful auth will automatically trigger re-render in App.jsx via AuthContext
     } catch (err) {
-      // Server error is already captured in AuthContext.authError
       console.warn('[LoginPage] Authentication error:', err.message);
     } finally {
       setIsSubmitting(false);
@@ -94,37 +91,37 @@ export function LoginPage() {
   const displayedError = clientError || authError;
 
   return (
-    <div className="min-h-screen w-screen flex flex-col justify-center items-center bg-[#0a1120] text-slate-100 p-4 relative overflow-hidden select-none">
-      {/* Background Ambient Grid Glow */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(14,165,233,0.15),rgba(255,255,255,0))]" />
-      <div className="absolute -top-40 -right-40 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="min-h-screen w-screen flex flex-col justify-center items-center bg-[#070c16] text-slate-100 p-4 relative overflow-hidden select-none font-sans">
+      {/* Subtle Ambient Radial Lighting */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,rgba(229,164,32,0.08),rgba(7,12,22,0))]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_100%,rgba(13,28,49,0.7),rgba(7,12,22,0))]" />
 
       {/* Main Authentication Card */}
-      <div className="w-full max-w-md relative z-10">
+      <div className="w-full max-w-[410px] relative z-10">
         {/* Brand Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-500 shadow-lg shadow-blue-500/25 mb-4 ring-1 ring-white/20">
-            <TrendingUp className="w-7 h-7 text-white" />
+        <div className="text-center mb-7">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#e5a420] text-[#070c16] font-bold text-xl shadow-lg shadow-amber-500/20 mb-3 ring-1 ring-white/20 tracking-tighter">
+            Z
           </div>
-          <h1 className="text-2xl font-serif font-bold text-white tracking-tight">
-            Equity Screening Platform
-          </h1>
-          <p className="text-xs uppercase tracking-widest text-slate-400 mt-1 font-semibold">
-            Institutional Research & Screening Portal
+          <div className="flex items-center justify-center space-x-1.5 text-2xl font-bold tracking-tight text-white">
+            <span>Zenius</span>
+            <span className="text-[#e5a420]">ScreenPro</span>
+          </div>
+          <p className="text-[12px] text-slate-400 mt-1 font-medium tracking-wide">
+            Institutional Equity Screening & Analytics
           </p>
         </div>
 
-        {/* Card Body */}
-        <div className="bg-[#111c30]/90 backdrop-blur-xl border border-slate-700/60 rounded-2xl shadow-2xl shadow-black/50 p-7">
-          {/* Mode Switcher Tabs */}
-          <div className="flex bg-[#0b1424] p-1 rounded-xl mb-6 border border-slate-800">
+        {/* Card Container */}
+        <div className="bg-[#0d1626]/90 backdrop-blur-xl border border-slate-800/80 rounded-2xl shadow-2xl shadow-black/60 p-7">
+          {/* Segmented Mode Switcher */}
+          <div className="flex bg-[#060b14] p-1 rounded-xl mb-6 border border-slate-800/70">
             <button
               type="button"
               onClick={() => handleModeSwitch('login')}
               className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
                 mode === 'login'
-                  ? 'bg-blue-600 text-white shadow-md'
+                  ? 'bg-[#15233a] text-white shadow-xs border border-slate-700/60'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -135,7 +132,7 @@ export function LoginPage() {
               onClick={() => handleModeSwitch('signup')}
               className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
                 mode === 'signup'
-                  ? 'bg-blue-600 text-white shadow-md'
+                  ? 'bg-[#15233a] text-white shadow-xs border border-slate-700/60'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -143,23 +140,23 @@ export function LoginPage() {
             </button>
           </div>
 
-          {/* Inactivity Session Expiry Banner */}
+          {/* Inactivity Session Expiry Notification */}
           {sessionTimedOut && (
-            <div className="mb-5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start space-x-3 text-amber-300 text-xs animate-in fade-in">
+            <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start space-x-2.5 text-amber-300 text-xs">
               <Clock className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
               <div>
-                <span className="font-semibold block">Session Timeout</span>
-                Your session was locked due to 30 minutes of inactivity. Please sign in again to continue.
+                <span className="font-semibold block">Session Expired</span>
+                Your session was locked after 30 minutes of inactivity. Please sign in again.
               </div>
             </div>
           )}
 
-          {/* Error Banner */}
+          {/* Error Alert */}
           {displayedError && (
-            <div className="mb-5 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start space-x-3 text-rose-300 text-xs animate-in fade-in">
+            <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start space-x-2.5 text-rose-300 text-xs">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
               <div>
-                <span className="font-semibold block">Authentication Failed</span>
+                <span className="font-semibold block">Authentication Error</span>
                 {displayedError}
               </div>
             </div>
@@ -170,7 +167,7 @@ export function LoginPage() {
             {/* Full Name Field (Sign-up only) */}
             {mode === 'signup' && (
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
                   Full Name
                 </label>
                 <div className="relative">
@@ -183,7 +180,7 @@ export function LoginPage() {
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="e.g. Prabhas Muthyala"
-                    className="w-full pl-10 pr-4 py-2.5 bg-[#0a1322] border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                    className="w-full pl-10 pr-4 py-2.5 bg-[#060b14] border border-slate-700/70 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-[#e5a420] focus:ring-1 focus:ring-[#e5a420]/40 transition"
                   />
                 </div>
               </div>
@@ -191,7 +188,7 @@ export function LoginPage() {
 
             {/* Email Field */}
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
                 Work Email Address
               </label>
               <div className="relative">
@@ -203,15 +200,15 @@ export function LoginPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="analyst@firm.com"
-                  className="w-full pl-10 pr-4 py-2.5 bg-[#0a1322] border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                  placeholder="analyst@zeniusit.com"
+                  className="w-full pl-10 pr-4 py-2.5 bg-[#060b14] border border-slate-700/70 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-[#e5a420] focus:ring-1 focus:ring-[#e5a420]/40 transition"
                 />
               </div>
             </div>
 
             {/* Password Field */}
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
                 Password
               </label>
               <div className="relative">
@@ -224,20 +221,20 @@ export function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
-                  className="w-full pl-10 pr-10 py-2.5 bg-[#0a1322] border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                  className="w-full pl-10 pr-10 py-2.5 bg-[#060b14] border border-slate-700/70 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-[#e5a420] focus:ring-1 focus:ring-[#e5a420]/40 transition"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition"
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition cursor-pointer"
                   tabIndex={-1}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
               {mode === 'signup' && (
-                <p className="text-[10px] text-slate-400 mt-1">
-                  At least 8 characters, including letters and numbers.
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Minimum 8 characters, including letters and numbers.
                 </p>
               )}
             </div>
@@ -245,7 +242,7 @@ export function LoginPage() {
             {/* Confirm Password (Sign-up only) */}
             {mode === 'signup' && (
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
                   Confirm Password
                 </label>
                 <div className="relative">
@@ -258,12 +255,12 @@ export function LoginPage() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    className="w-full pl-10 pr-10 py-2.5 bg-[#0a1322] border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                    className="w-full pl-10 pr-10 py-2.5 bg-[#060b14] border border-slate-700/70 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-[#e5a420] focus:ring-1 focus:ring-[#e5a420]/40 transition"
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition"
+                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition cursor-pointer"
                     tabIndex={-1}
                   >
                     {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -276,33 +273,33 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full mt-2 py-2.5 px-4 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-blue-500/20 flex items-center justify-center space-x-2 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className="w-full mt-2 py-2.5 px-4 bg-[#e5a420] hover:bg-[#f3b028] text-[#070c16] font-bold text-xs rounded-xl shadow-md shadow-amber-500/10 flex items-center justify-center space-x-2 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {isSubmitting ? (
                 <>
-                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>{mode === 'login' ? 'Authenticating...' : 'Creating Account...'}</span>
+                  <div className="w-3.5 h-3.5 border-2 border-[#070c16]/30 border-t-[#070c16] rounded-full animate-spin" />
+                  <span>{mode === 'login' ? 'Authenticating...' : 'Registering...'}</span>
                 </>
               ) : (
                 <>
-                  <span>{mode === 'login' ? 'Sign In to Portal' : 'Register Account'}</span>
+                  <span>{mode === 'login' ? 'Sign In' : 'Create Account'}</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </>
               )}
             </button>
           </form>
 
-          {/* Footer Toggle Link */}
-          <div className="mt-6 pt-5 border-t border-slate-800 text-center">
+          {/* Mode Switch Helper */}
+          <div className="mt-5 pt-4 border-t border-slate-800/80 text-center">
             {mode === 'login' ? (
               <p className="text-xs text-slate-400">
-                New analyst?{' '}
+                Don't have an account?{' '}
                 <button
                   type="button"
                   onClick={() => handleModeSwitch('signup')}
-                  className="text-blue-400 hover:text-blue-300 font-semibold cursor-pointer underline underline-offset-2 ml-1"
+                  className="text-[#e5a420] hover:text-[#f3b028] font-semibold cursor-pointer ml-1"
                 >
-                  Create an account
+                  Create one now
                 </button>
               </p>
             ) : (
@@ -311,7 +308,7 @@ export function LoginPage() {
                 <button
                   type="button"
                   onClick={() => handleModeSwitch('login')}
-                  className="text-blue-400 hover:text-blue-300 font-semibold cursor-pointer underline underline-offset-2 ml-1"
+                  className="text-[#e5a420] hover:text-[#f3b028] font-semibold cursor-pointer ml-1"
                 >
                   Sign in here
                 </button>
@@ -320,10 +317,10 @@ export function LoginPage() {
           </div>
         </div>
 
-        {/* Security Assurance Badge */}
-        <div className="flex items-center justify-center space-x-2 text-[11px] text-slate-500 mt-6">
-          <ShieldCheck className="w-4 h-4 text-emerald-500/80" />
-          <span>256-bit encrypted authentication · 30-min idle protection</span>
+        {/* Security / Institutional Footer */}
+        <div className="flex items-center justify-center space-x-2 text-[11px] text-slate-500 mt-5">
+          <ShieldCheck className="w-3.5 h-3.5 text-slate-500" />
+          <span>256-bit encrypted · Session isolation active</span>
         </div>
       </div>
     </div>
