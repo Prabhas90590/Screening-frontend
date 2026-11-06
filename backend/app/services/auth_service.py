@@ -50,10 +50,9 @@ class AuthResult:
 class SignupInitiatedResult:
     """Value object returned when registration requires OTP verification."""
 
-    def __init__(self, email: str, message: str, code: Optional[str] = None):
+    def __init__(self, email: str, message: str):
         self.email = email
         self.message = message
-        self.code = code
         self.requires_verification = True
 
 
@@ -122,9 +121,9 @@ def register_user(
 
     1. Enforces corporate domain @zeniusit.com.
     2. Validates password strength (min 8 chars, letters and digits).
-    3. Generates a secure 6-digit OTP code valid for 15 minutes.
+    3. Generates a random, cryptographically secure 6-digit OTP code valid for 15 minutes.
     4. Creates the account in an unverified state (is_verified = False).
-    5. Dispatches verification code via email.
+    5. Dispatches verification code via actual email.
     """
     clean_email = email.lower().strip()
 
@@ -148,18 +147,17 @@ def register_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="An account with this email address already exists. Please sign in.",
             )
-        # If registered but unverified, refresh the verification code and resend
+        # If registered but unverified, refresh the verification code and resend via email
         code = f"{secrets.randbelow(900000) + 100000}"
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
         user_repository.set_verification_code(clean_email, code, expires_at)
         email_service.send_verification_email(clean_email, code, existing_user.full_name)
         return SignupInitiatedResult(
             email=clean_email,
-            message="A verification code has been dispatched to your corporate inbox. Please enter it to activate your account.",
-            code=code,
+            message="A verification code has been sent to your corporate email. Please check your inbox (and Junk/Spam folder).",
         )
 
-    # Generate 6-digit OTP
+    # Generate random 6-digit OTP
     code = f"{secrets.randbelow(900000) + 100000}"
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
 
@@ -184,14 +182,13 @@ def register_user(
             detail="Could not create user account. Please try again later.",
         )
 
-    # Send verification email asynchronously
+    # Send actual email to corporate address
     email_service.send_verification_email(clean_email, code, full_name)
-    logger.info(f"Initiated account registration for '{clean_email}'. Dispatched OTP code.")
+    logger.info(f"Initiated account registration for '{clean_email}'. Dispatched OTP code via email.")
 
     return SignupInitiatedResult(
         email=clean_email,
-        message=f"Verification code sent to {clean_email}. Please enter the 6-digit code to activate your account.",
-        code=code,
+        message=f"Verification code sent to {clean_email}. Please check your inbox (and Junk/Spam folder) to activate your account.",
     )
 
 
@@ -208,7 +205,6 @@ def verify_user_email(email: str, code: str) -> AuthResult:
         )
 
     if user.is_verified:
-        # Already verified: issue session token directly
         token = create_access_token(user_id=user.id, email=user.email, full_name=user.full_name)
         return AuthResult(user=user, access_token=token)
 
@@ -230,8 +226,8 @@ def verify_user_email(email: str, code: str) -> AuthResult:
     return AuthResult(user=verified_user, access_token=token)
 
 
-def resend_verification_code(email: str) -> str:
-    """Generate and dispatch a fresh 6-digit activation code and return it."""
+def resend_verification_code(email: str) -> None:
+    """Generate and dispatch a fresh random 6-digit activation code via email."""
     clean_email = email.lower().strip()
     user = user_repository.get_by_email(clean_email)
     if not user:
@@ -250,33 +246,31 @@ def resend_verification_code(email: str) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
     user_repository.set_verification_code(clean_email, code, expires_at)
     email_service.send_verification_email(clean_email, code, user.full_name)
-    logger.info(f"Resent verification code for '{clean_email}': {code}")
-    return code
+    logger.info(f"Resent verification code for '{clean_email}'.")
 
 
 # ---------------------------------------------------------------------------
 # Password Reset (Forgot Password)
 # ---------------------------------------------------------------------------
 
-def request_password_reset(email: str) -> Optional[str]:
-    """Dispatch a 6-digit password reset authorization code to the user's email."""
+def request_password_reset(email: str) -> None:
+    """Dispatch a random 6-digit password reset authorization code to the user's email."""
     clean_email = email.lower().strip()
 
     if not clean_email.endswith(ALLOWED_CORPORATE_DOMAIN):
         logger.warning(f"Password reset requested for non-corporate email: '{clean_email}'")
-        return None
+        return
 
     user = user_repository.get_by_email(clean_email)
     if not user or not user.is_active:
         logger.info(f"Password reset requested for non-existent/inactive email: '{clean_email}'")
-        return None
+        return
 
     code = f"{secrets.randbelow(900000) + 100000}"
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
     user_repository.set_reset_token(clean_email, code, expires_at)
     email_service.send_password_reset_email(clean_email, code, user.full_name)
-    logger.info(f"Password reset code generated and dispatched for '{clean_email}': {code}")
-    return code
+    logger.info(f"Password reset code generated and dispatched for '{clean_email}'.")
 
 
 def complete_password_reset(email: str, code: str, new_password: str) -> None:

@@ -4,11 +4,12 @@ Handles secure dispatch of:
 1. 6-digit Email Verification Codes for corporate self-registration (@zeniusit.com).
 2. 6-digit Authenticated Password Reset Codes.
 
-Includes live SMTP transport with automatic fallback logging to 'backend/logs/sent_emails/'
-to guarantee zero friction during development or network interruptions.
+Implements standard multi-part email (plain text + HTML) for maximum deliverability
+and inbox placement across corporate mail filters (including Microsoft 365 Exchange).
 """
 
 from datetime import datetime, timezone
+from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import html
@@ -35,7 +36,7 @@ class EmailService:
             pass
 
     def _save_to_disk(self, subject: str, recipient: str, html_body: str) -> None:
-        """Archive email to disk for developer diagnostics and testing."""
+        """Archive email to disk for developer diagnostics and auditing."""
         try:
             safe_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             safe_user = recipient.replace("@", "_at_").replace(".", "_")
@@ -45,46 +46,66 @@ class EmailService:
         except Exception as e:
             logger.warning(f"Could not archive email to disk: {e}")
 
-    def _dispatch_smtp(self, recipient: str, subject: str, html_body: str) -> bool:
-        """Synchronously send email via SMTP with graceful fallback to disk archiving."""
-        # Always archive to disk so the code is inspectable in development
+    def _dispatch_smtp(self, recipient: str, subject: str, plain_body: str, html_body: str) -> bool:
+        """Synchronously send multi-part email via SMTP with RFC-compliant headers."""
+        # Archive to disk for diagnostic audit trail
         self._save_to_disk(subject, recipient, html_body)
 
         if not (settings.smtp_host and settings.smtp_user and settings.smtp_password):
-            logger.info(
-                f"[EmailService] Live SMTP not configured. Code archived to disk for '{recipient}'."
+            logger.warning(
+                f"[EmailService] Live SMTP credentials not configured in .env. Email for '{recipient}' archived to disk."
             )
             return False
 
         try:
+            # Construct multi-part alternative message (plain-text + HTML for anti-spam deliverability)
             msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
+            msg["Subject"] = Header(subject, "utf-8")
             msg["From"] = settings.email_from or f"Zenius ScreenPro <{settings.smtp_user}>"
             msg["To"] = recipient
             msg["Date"] = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
 
-            part = MIMEText(html_body, "html", "utf-8")
-            msg.attach(part)
+            # 1. Plain text fallback
+            part_plain = MIMEText(plain_body, "plain", "utf-8")
+            msg.attach(part_plain)
 
-            server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=12)
+            # 2. Rich HTML version
+            part_html = MIMEText(html_body, "html", "utf-8")
+            msg.attach(part_html)
+
+            server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15)
             if settings.smtp_use_tls:
                 server.starttls()
             server.login(settings.smtp_user, settings.smtp_password)
             server.send_message(msg)
             server.quit()
 
-            logger.info(f"[EmailService] Successfully sent '{subject}' to {recipient} via SMTP.")
+            logger.info(f"[EmailService] Successfully delivered verification email to {recipient} via SMTP.")
             return True
         except Exception as e:
-            logger.warning(
-                f"[EmailService] SMTP delivery failed for '{recipient}' ({e}). Code remains archived in logs/sent_emails/."
+            logger.error(
+                f"[EmailService] SMTP delivery failed for '{recipient}': {e}. Archived to logs/sent_emails/."
             )
             return False
 
     def send_verification_email(self, to_email: str, code: str, full_name: Optional[str] = None) -> None:
         """Send a 6-digit verification code to activate a new corporate @zeniusit.com account."""
         display_name = full_name.strip() if full_name else to_email.split("@")[0]
-        subject = f"🔐 {code} is your Zenius ScreenPro verification code"
+        subject = f"Zenius ScreenPro: Your Verification Code is {code}"
+
+        plain_body = f"""Hello {display_name},
+
+A new analyst account registration was requested for {to_email} on the Zenius ScreenPro institutional equity platform.
+
+Your 6-digit verification code is: {code}
+
+This code expires in 15 minutes. Please enter it on the verification screen to activate your account.
+
+If you did not initiate this request, no action is needed. Zenius ScreenPro is strictly restricted to authorized @zeniusit.com analysts.
+
+---
+Zenius ScreenPro · Institutional Equity Screener & Analytics
+"""
 
         html_body = f"""<!DOCTYPE html>
 <html>
@@ -120,7 +141,7 @@ class EmailService:
                     </span>
                 </div>
                 <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
-                    ⏱️ Code expires in <strong>15 minutes</strong>.
+                    This code expires in <strong>15 minutes</strong>.
                 </div>
             </div>
 
@@ -138,17 +159,30 @@ class EmailService:
 </html>"""
 
         logger.info(f"[EmailService] Verification OTP code generated for '{to_email}': {code}")
-        # Dispatch in background thread so HTTP response returns instantly
         threading.Thread(
             target=self._dispatch_smtp,
-            args=(to_email, subject, html_body),
+            args=(to_email, subject, plain_body, html_body),
             daemon=True,
         ).start()
 
     def send_password_reset_email(self, to_email: str, code: str, full_name: Optional[str] = None) -> None:
         """Send a 6-digit password reset code to a verified corporate user."""
         display_name = full_name.strip() if full_name else to_email.split("@")[0]
-        subject = f"🔑 {code} is your Zenius ScreenPro password reset code"
+        subject = f"Zenius ScreenPro: Your Password Reset Code is {code}"
+
+        plain_body = f"""Hello {display_name},
+
+We received a request to reset the password for your Zenius ScreenPro account ({to_email}).
+
+Your 6-digit authorization code is: {code}
+
+This code expires in 15 minutes. Enter this code on the password reset screen to set a new password.
+
+If you did not request a password reset, please notify security or your IT administrator immediately.
+
+---
+Zenius ScreenPro · Institutional Equity Screener & Analytics
+"""
 
         html_body = f"""<!DOCTYPE html>
 <html>
@@ -184,12 +218,12 @@ class EmailService:
                     </span>
                 </div>
                 <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
-                    ⏱️ Code expires in <strong>15 minutes</strong>.
+                    This code expires in <strong>15 minutes</strong>.
                 </div>
             </div>
 
             <div style="background-color: #fef2f2; border-left: 3px solid #ef4444; padding: 10px 14px; margin: 20px 0; font-size: 12px; color: #991b1b; line-height: 1.4;">
-                <strong>Important:</strong> If you did not request this password reset, please notify security or your IT administrator immediately. Your existing password remains secure until this code is verified.
+                <strong>Important:</strong> If you did not request this password reset, please contact security immediately. Your existing password remains secure until this code is verified.
             </div>
         </div>
 
@@ -202,10 +236,9 @@ class EmailService:
 </html>"""
 
         logger.info(f"[EmailService] Password reset OTP generated for '{to_email}': {code}")
-        # Dispatch in background thread so HTTP response returns instantly
         threading.Thread(
             target=self._dispatch_smtp,
-            args=(to_email, subject, html_body),
+            args=(to_email, subject, plain_body, html_body),
             daemon=True,
         ).start()
 

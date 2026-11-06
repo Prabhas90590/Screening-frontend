@@ -1,9 +1,9 @@
 /**
  * Zenius ScreenPro — Institutional Authentication & Verification Portal.
  *
- * Professional, simple, and secure authentication interface:
+ * Professional, simple, and secure corporate authentication:
  * - Domain-restricted corporate login & self-registration (@zeniusit.com).
- * - 6-digit OTP Email Verification flow with live preview and auto-fill.
+ * - Real email delivery: 6-digit OTP dispatched directly to corporate email inbox.
  * - Authenticated Forgot Password & Reset Password flows.
  * - Institutional green & white theme matching the screener dashboard.
  */
@@ -50,9 +50,6 @@ export function LoginPage() {
   const [resetCode, setResetCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
-
-  // Visible verification code for instant review & dev access
-  const [devCode, setDevCode] = useState('');
 
   // Password visibility
   const [showPassword, setShowPassword] = useState(false);
@@ -111,15 +108,10 @@ export function LoginPage() {
       } catch (err) {
         if (err.message && err.message.toLowerCase().includes('not verified')) {
           setMode('verify');
-          // Automatically dispatch a fresh code so it appears on screen immediately
           try {
-            const resendRes = await resendVerification(cleanEmail);
-            if (resendRes?.code) {
-              setDevCode(resendRes.code);
-              setVerificationCode(resendRes.code);
-            }
+            await resendVerification(cleanEmail);
           } catch {}
-          setSuccessMessage('Please enter the 6-digit code sent to your corporate email.');
+          setSuccessMessage('A 6-digit verification code was sent to your corporate email. Please check your inbox.');
         }
       } finally {
         setIsSubmitting(false);
@@ -147,11 +139,8 @@ export function LoginPage() {
         const res = await signup(cleanEmail, password, fullName.trim());
         if (res?.requiresVerification) {
           setMode('verify');
-          if (res.verification_code) {
-            setDevCode(res.verification_code);
-            setVerificationCode(res.verification_code);
-          }
-          setSuccessMessage(res.message || 'Verification code sent to your corporate inbox.');
+          setVerificationCode('');
+          setSuccessMessage(res.message || `Verification code sent to ${cleanEmail}. Please check your inbox.`);
           setResendCooldown(30);
         }
       } catch (err) {
@@ -171,7 +160,7 @@ export function LoginPage() {
 
     const cleanCode = verificationCode.trim();
     if (!cleanCode || cleanCode.length < 6) {
-      setClientError('Please enter the complete 6-digit verification code.');
+      setClientError('Please enter the 6-digit verification code sent to your email.');
       return;
     }
 
@@ -193,12 +182,8 @@ export function LoginPage() {
     clearAuthError();
 
     try {
-      const res = await resendVerification(email.trim().toLowerCase());
-      if (res?.code) {
-        setDevCode(res.code);
-        setVerificationCode(res.code);
-      }
-      setSuccessMessage('A fresh verification code has been dispatched to your corporate inbox.');
+      await resendVerification(email.trim().toLowerCase());
+      setSuccessMessage('A fresh verification code has been dispatched to your corporate email. Please check your inbox and Junk folder.');
       setResendCooldown(30);
     } catch (err) {
       setClientError(err.message || 'Failed to resend code.');
@@ -221,12 +206,9 @@ export function LoginPage() {
     setIsSubmitting(true);
     try {
       const res = await forgotPassword(cleanEmail);
-      if (res?.code) {
-        setDevCode(res.code);
-        setResetCode(res.code);
-      }
-      setSuccessMessage(res?.message || 'If registered, a 6-digit reset code has been sent.');
+      setSuccessMessage(res?.message || 'If registered, a 6-digit reset code has been sent to your email.');
       setForgotStep(2);
+      setResetCode('');
       setResendCooldown(30);
     } catch (err) {
       setClientError(err.message || 'Failed to request password reset.');
@@ -244,7 +226,7 @@ export function LoginPage() {
 
     const cleanCode = resetCode.trim();
     if (!cleanCode || cleanCode.length < 6) {
-      setClientError('Please enter the 6-digit authorization code.');
+      setClientError('Please enter the 6-digit authorization code from your email.');
       return;
     }
 
@@ -269,7 +251,6 @@ export function LoginPage() {
       setNewPassword('');
       setConfirmNewPassword('');
       setResetCode('');
-      setDevCode('');
       setTimeout(() => {
         setMode('login');
       }, 2000);
@@ -351,10 +332,13 @@ export function LoginPage() {
                 <KeyRound className="w-5 h-5" />
               </div>
               <h2 className="text-base font-bold text-slate-900">Corporate Email Verification</h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Enter the 6-digit activation code sent to:
+              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                A 6-digit activation code was sent to:
                 <br />
                 <span className="font-semibold text-[#147b73]">{email}</span>
+              </p>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Please check your inbox (and Junk/Spam folder).
               </p>
             </div>
           )}
@@ -368,8 +352,8 @@ export function LoginPage() {
               <h2 className="text-base font-bold text-slate-900">Reset Account Password</h2>
               <p className="text-xs text-slate-500 mt-1">
                 {forgotStep === 1
-                  ? 'Enter your corporate @zeniusit.com email to receive a password reset authorization code.'
-                  : 'Enter the 6-digit code and choose a new password.'}
+                  ? 'Enter your corporate @zeniusit.com email to receive an authorization code.'
+                  : 'Enter the 6-digit code received in your email and choose a new password.'}
               </p>
             </div>
           )}
@@ -390,7 +374,7 @@ export function LoginPage() {
             <div className="mb-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start space-x-2.5 text-emerald-800 text-xs">
               <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
               <div>
-                <span className="font-semibold block">Notice</span>
+                <span className="font-semibold block">Status</span>
                 {successMessage}
               </div>
             </div>
@@ -401,7 +385,7 @@ export function LoginPage() {
             <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-start space-x-2.5 text-rose-700 text-xs">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
               <div>
-                <span className="font-semibold block">Authentication Notice</span>
+                <span className="font-semibold block">Notice</span>
                 {displayedError}
               </div>
             </div>
@@ -459,7 +443,7 @@ export function LoginPage() {
                 </div>
                 {mode === 'signup' && (
                   <p className="text-[10px] text-slate-500 mt-1">
-                    An activation OTP code will be dispatched to confirm ownership of this corporate inbox.
+                    An activation OTP code will be sent to confirm access to this corporate inbox.
                   </p>
                 )}
               </div>
@@ -564,34 +548,9 @@ export function LoginPage() {
           {/* ============================================================= */}
           {mode === 'verify' && (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
-              {/* Prominent Verification Code Display Card */}
-              <div className="p-3.5 rounded-xl bg-[#f0f9f8] border border-[#238c83]/40 text-center">
-                <div className="text-[11px] font-bold text-[#147b73] uppercase tracking-wider mb-1.5 flex items-center justify-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-[#147b73]" />
-                  <span>Your 6-Digit Activation Code</span>
-                </div>
-                <div className="flex items-center justify-center gap-2 mt-1">
-                  <span className="font-mono text-2xl font-black tracking-[0.25em] text-[#0f675f] bg-white px-4 py-1 rounded-lg border border-[#b2ded9] shadow-2xs">
-                    {devCode || verificationCode || '••••••'}
-                  </span>
-                  {devCode && (
-                    <button
-                      type="button"
-                      onClick={() => setVerificationCode(devCode)}
-                      className="text-xs bg-[#147b73] hover:bg-[#0f675f] text-white px-2.5 py-1.5 rounded-md font-semibold transition cursor-pointer"
-                    >
-                      Auto-Fill
-                    </button>
-                  )}
-                </div>
-                <p className="text-[10px] text-slate-500 mt-2">
-                  Dispatched to <strong>{email}</strong> & saved in backend logs.
-                </p>
-              </div>
-
               <div>
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1.5 text-center">
-                  Confirm 6-Digit Code Below
+                  Enter 6-Digit Code From Email
                 </label>
                 <div className="relative">
                   <input
@@ -601,12 +560,12 @@ export function LoginPage() {
                     autoFocus
                     value={verificationCode}
                     onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
-                    placeholder="123456"
+                    placeholder="••••••"
                     className="w-full py-2.5 px-4 bg-white border border-slate-300 rounded-xl text-center text-xl font-mono font-bold tracking-[0.35em] text-slate-900 placeholder-slate-300 focus:outline-hidden focus:border-[#147b73] focus:ring-2 focus:ring-[#147b73]/20 transition"
                   />
                 </div>
                 <div className="flex items-center justify-between text-xs mt-2 px-1 text-slate-500">
-                  <span>Expires in 15 minutes</span>
+                  <span>Code expires in 15 minutes</span>
                   <button
                     type="button"
                     disabled={resendCooldown > 0}
@@ -705,35 +664,10 @@ export function LoginPage() {
 
           {mode === 'forgot' && forgotStep === 2 && (
             <form onSubmit={handleResetSubmit} className="space-y-4">
-              {/* Prominent Reset Code Display Card */}
-              <div className="p-3.5 rounded-xl bg-[#fefce8] border border-[#ca8a04]/40 text-center">
-                <div className="text-[11px] font-bold text-[#854d0e] uppercase tracking-wider mb-1.5 flex items-center justify-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-[#854d0e]" />
-                  <span>Password Reset Authorization Code</span>
-                </div>
-                <div className="flex items-center justify-center gap-2 mt-1">
-                  <span className="font-mono text-2xl font-black tracking-[0.25em] text-[#854d0e] bg-white px-4 py-1 rounded-lg border border-[#fde047] shadow-2xs">
-                    {devCode || resetCode || '••••••'}
-                  </span>
-                  {devCode && (
-                    <button
-                      type="button"
-                      onClick={() => setResetCode(devCode)}
-                      className="text-xs bg-[#b45309] hover:bg-[#92400e] text-white px-2.5 py-1.5 rounded-md font-semibold transition cursor-pointer"
-                    >
-                      Auto-Fill
-                    </button>
-                  )}
-                </div>
-                <p className="text-[10px] text-slate-500 mt-2">
-                  Dispatched to <strong>{email}</strong> & saved in backend logs.
-                </p>
-              </div>
-
               {/* 6-Digit Code */}
               <div>
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1.5 text-center">
-                  6-Digit Authorization Code
+                  6-Digit Code From Email
                 </label>
                 <input
                   type="text"
@@ -741,7 +675,7 @@ export function LoginPage() {
                   maxLength={6}
                   value={resetCode}
                   onChange={(e) => setResetCode(e.target.value.replace(/\D/g, ''))}
-                  placeholder="123456"
+                  placeholder="••••••"
                   className="w-full py-2.5 px-4 bg-white border border-slate-300 rounded-xl text-center text-xl font-mono font-bold tracking-[0.3em] text-slate-900 placeholder-slate-300 focus:outline-hidden focus:border-[#147b73] focus:ring-2 focus:ring-[#147b73]/20 transition"
                 />
               </div>

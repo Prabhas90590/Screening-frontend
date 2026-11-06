@@ -1,11 +1,11 @@
 """Authentication API Routes.
 
 Exposes REST endpoints for:
-- POST /api/auth/signup               (Initiate registration for corporate @zeniusit.com with 6-digit OTP)
+- POST /api/auth/signup               (Initiate registration for corporate @zeniusit.com with 6-digit OTP sent via email)
 - POST /api/auth/verify-email          (Confirm email ownership via 6-digit OTP code)
-- POST /api/auth/resend-verification   (Dispatch fresh verification OTP code)
+- POST /api/auth/resend-verification   (Dispatch fresh verification OTP code via email)
 - POST /api/auth/login                (Credentials verification with brute-force rate limiter)
-- POST /api/auth/forgot-password      (Dispatch 6-digit password reset authorization code)
+- POST /api/auth/forgot-password      (Dispatch 6-digit password reset authorization code via email)
 - POST /api/auth/reset-password       (Set new password via verified reset code)
 - POST /api/auth/change-password      (Authenticated in-app password update)
 - PUT  /api/auth/profile              (Authenticated profile name update)
@@ -70,7 +70,7 @@ def _extract_client_ip(request: Request) -> str:
 def signup(request: UserSignupRequest):
     """Enforces corporate @zeniusit.com domain.
 
-    Dispatches a 6-digit activation OTP to the user's corporate email.
+    Dispatches a random 6-digit activation OTP to the user's corporate email.
     The account remains unverified until the OTP is provided to /verify-email.
     """
     try:
@@ -83,7 +83,6 @@ def signup(request: UserSignupRequest):
             message=result.message,
             email=result.email,
             requires_verification=True,
-            verification_code=result.code,
         )
     except HTTPException:
         raise
@@ -128,15 +127,14 @@ def verify_email(request: VerifyEmailRequest):
     "/resend-verification",
     response_model=GenericMessageResponse,
     status_code=status.HTTP_200_OK,
-    summary="Resend a 6-digit activation code",
+    summary="Resend a 6-digit activation code via email",
 )
 def resend_verification(request: ResendVerificationRequest):
-    """Generate and dispatch a fresh 6-digit activation code to corporate inbox."""
+    """Generate and dispatch a fresh random 6-digit activation code to corporate inbox."""
     try:
-        code = resend_verification_code(email=request.email)
+        resend_verification_code(email=request.email)
         return GenericMessageResponse(
-            message="A fresh verification code has been dispatched to your corporate inbox.",
-            code=code,
+            message="A fresh verification code has been sent to your corporate email. Please check your inbox and Spam folder."
         )
     except HTTPException:
         raise
@@ -210,15 +208,14 @@ def login(request: UserLoginRequest, http_request: Request):
 def forgot_password(request: ForgotPasswordRequest):
     """Dispatches a password reset authorization code via email."""
     try:
-        code = request_password_reset(email=request.email)
+        request_password_reset(email=request.email)
         return GenericMessageResponse(
-            message="If an account exists with this email address, a password reset code has been dispatched to your corporate inbox.",
-            code=code,
+            message="If an account exists with this email address, a password reset code has been sent to your corporate inbox."
         )
     except Exception as e:
         logger.error(f"Unexpected error in forgot_password for '{request.email}': {e}")
         return GenericMessageResponse(
-            message="If an account exists with this email address, a password reset code has been dispatched to your corporate inbox."
+            message="If an account exists with this email address, a password reset code has been sent to your corporate inbox."
         )
 
 
