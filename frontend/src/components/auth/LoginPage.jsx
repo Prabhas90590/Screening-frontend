@@ -1,12 +1,14 @@
 /**
  * Zenius ScreenPro — Institutional Login & Analyst Registration Portal.
  *
- * Professional, simple, and executive authentication interface:
+ * Professional, simple, and clean authentication interface:
+ * - Institutional green & white theme matching the Screener dashboard.
+ * - Primary brand teal/green: #147b73 with crisp white cards and #f3f6f9 canvas.
  * - Dual-mode: Sign In & Open Self-Registration.
  * - Password visibility toggle.
  * - Real-time client & server validation with clear error messaging.
- * - Session timeout notification banner.
- * - High-contrast institutional typography and gold accent branding.
+ * - Inactivity session timeout notification banner.
+ * - Gold emblem and institutional security assurance badge.
  */
 
 import React, { useState } from 'react';
@@ -91,38 +93,48 @@ export function LoginPage() {
   const displayedError = clientError || authError;
 
   return (
-    <div className="min-h-screen w-screen flex flex-col justify-center items-center bg-[#070c16] text-slate-100 p-4 relative overflow-hidden select-none font-sans">
-      {/* Subtle Ambient Radial Lighting */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,rgba(229,164,32,0.08),rgba(7,12,22,0))]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_100%,rgba(13,28,49,0.7),rgba(7,12,22,0))]" />
+    <div className="min-h-screen w-screen flex flex-col justify-center items-center bg-[#f3f6f9] text-slate-800 p-4 relative overflow-hidden select-none font-sans">
+      {/* Subtle Institutional Brand Ambient Glow */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-60"
+        style={{
+          background: 'radial-gradient(ellipse 70% 50% at 50% 0%, rgba(20, 123, 115, 0.08) 0%, rgba(243, 246, 249, 0) 100%)',
+        }}
+      />
+      <div
+        className="absolute inset-0 pointer-events-none opacity-40"
+        style={{
+          background: 'radial-gradient(ellipse 50% 40% at 50% 100%, rgba(35, 140, 131, 0.06) 0%, rgba(243, 246, 249, 0) 100%)',
+        }}
+      />
 
-      {/* Main Authentication Card */}
-      <div className="w-full max-w-[410px] relative z-10">
+      {/* Main Authentication Container */}
+      <div className="w-full max-w-[420px] relative z-10">
         {/* Brand Header */}
-        <div className="text-center mb-7">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#e5a420] text-[#070c16] font-bold text-xl shadow-lg shadow-amber-500/20 mb-3 ring-1 ring-white/20 tracking-tighter">
+        <div className="text-center mb-6">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#e5a420] text-[#0d1c31] font-bold text-xl shadow-sm mb-3 tracking-tight">
             Z
           </div>
-          <div className="flex items-center justify-center space-x-1.5 text-2xl font-bold tracking-tight text-white">
+          <div className="flex items-center justify-center space-x-1.5 text-2xl font-bold tracking-tight text-slate-900">
             <span>Zenius</span>
-            <span className="text-[#e5a420]">ScreenPro</span>
+            <span className="text-[#147b73]">ScreenPro</span>
           </div>
-          <p className="text-[12px] text-slate-400 mt-1 font-medium tracking-wide">
+          <p className="text-[12px] text-slate-500 mt-1 font-medium tracking-wide">
             Institutional Equity Screening & Analytics
           </p>
         </div>
 
-        {/* Card Container */}
-        <div className="bg-[#0d1626]/90 backdrop-blur-xl border border-slate-800/80 rounded-2xl shadow-2xl shadow-black/60 p-7">
+        {/* Crisp White Card */}
+        <div className="bg-white border border-slate-200/90 rounded-2xl shadow-xl shadow-slate-200/70 p-7 sm:p-8">
           {/* Segmented Mode Switcher */}
-          <div className="flex bg-[#060b14] p-1 rounded-xl mb-6 border border-slate-800/70">
+          <div className="flex bg-[#eef3f6] p-1 rounded-xl mb-6 border border-slate-200/80">
             <button
               type="button"
               onClick={() => handleModeSwitch('login')}
-              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
                 mode === 'login'
-                  ? 'bg-[#15233a] text-white shadow-xs border border-slate-700/60'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-white text-[#147b73] font-bold shadow-xs border border-slate-200/80'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Sign In
@@ -130,10 +142,10 @@ export function LoginPage() {
             <button
               type="button"
               onClick={() => handleModeSwitch('signup')}
-              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
                 mode === 'signup'
-                  ? 'bg-[#15233a] text-white shadow-xs border border-slate-700/60'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-white text-[#147b73] font-bold shadow-xs border border-slate-200/80'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Create Account
@@ -142,8 +154,8 @@ export function LoginPage() {
 
           {/* Inactivity Session Expiry Notification */}
           {sessionTimedOut && (
-            <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start space-x-2.5 text-amber-300 text-xs">
-              <Clock className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+            <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-start space-x-2.5 text-amber-800 text-xs">
+              <Clock className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
               <div>
                 <span className="font-semibold block">Session Expired</span>
                 Your session was locked after 30 minutes of inactivity. Please sign in again.
@@ -153,8 +165,8 @@ export function LoginPage() {
 
           {/* Error Alert */}
           {displayedError && (
-            <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start space-x-2.5 text-rose-300 text-xs">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+            <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-start space-x-2.5 text-rose-700 text-xs">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
               <div>
                 <span className="font-semibold block">Authentication Error</span>
                 {displayedError}
@@ -167,11 +179,11 @@ export function LoginPage() {
             {/* Full Name Field (Sign-up only) */}
             {mode === 'signup' && (
               <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1.5">
                   Full Name
                 </label>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     <User className="w-4 h-4" />
                   </div>
                   <input
@@ -180,7 +192,7 @@ export function LoginPage() {
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="e.g. Prabhas Muthyala"
-                    className="w-full pl-10 pr-4 py-2.5 bg-[#060b14] border border-slate-700/70 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-[#e5a420] focus:ring-1 focus:ring-[#e5a420]/40 transition"
+                    className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-hidden focus:border-[#147b73] focus:ring-2 focus:ring-[#147b73]/20 transition"
                   />
                 </div>
               </div>
@@ -188,11 +200,11 @@ export function LoginPage() {
 
             {/* Email Field */}
             <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1.5">
                 Work Email Address
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Mail className="w-4 h-4" />
                 </div>
                 <input
@@ -201,18 +213,18 @@ export function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="analyst@zeniusit.com"
-                  className="w-full pl-10 pr-4 py-2.5 bg-[#060b14] border border-slate-700/70 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-[#e5a420] focus:ring-1 focus:ring-[#e5a420]/40 transition"
+                  className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-hidden focus:border-[#147b73] focus:ring-2 focus:ring-[#147b73]/20 transition"
                 />
               </div>
             </div>
 
             {/* Password Field */}
             <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1.5">
                 Password
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Lock className="w-4 h-4" />
                 </div>
                 <input
@@ -221,13 +233,14 @@ export function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
-                  className="w-full pl-10 pr-10 py-2.5 bg-[#060b14] border border-slate-700/70 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-[#e5a420] focus:ring-1 focus:ring-[#e5a420]/40 transition"
+                  className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-hidden focus:border-[#147b73] focus:ring-2 focus:ring-[#147b73]/20 transition"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition cursor-pointer"
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition cursor-pointer"
                   tabIndex={-1}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -242,11 +255,11 @@ export function LoginPage() {
             {/* Confirm Password (Sign-up only) */}
             {mode === 'signup' && (
               <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1.5">
                   Confirm Password
                 </label>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                     <Lock className="w-4 h-4" />
                   </div>
                   <input
@@ -255,13 +268,14 @@ export function LoginPage() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    className="w-full pl-10 pr-10 py-2.5 bg-[#060b14] border border-slate-700/70 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-[#e5a420] focus:ring-1 focus:ring-[#e5a420]/40 transition"
+                    className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-hidden focus:border-[#147b73] focus:ring-2 focus:ring-[#147b73]/20 transition"
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition cursor-pointer"
+                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition cursor-pointer"
                     tabIndex={-1}
+                    aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
                   >
                     {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -273,11 +287,11 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full mt-2 py-2.5 px-4 bg-[#e5a420] hover:bg-[#f3b028] text-[#070c16] font-bold text-xs rounded-xl shadow-md shadow-amber-500/10 flex items-center justify-center space-x-2 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className="w-full mt-2 py-2.5 px-4 bg-[#147b73] hover:bg-[#0f675f] text-white font-bold text-xs rounded-xl shadow-sm hover:shadow-md transition flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {isSubmitting ? (
                 <>
-                  <div className="w-3.5 h-3.5 border-2 border-[#070c16]/30 border-t-[#070c16] rounded-full animate-spin" />
+                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   <span>{mode === 'login' ? 'Authenticating...' : 'Registering...'}</span>
                 </>
               ) : (
@@ -290,25 +304,25 @@ export function LoginPage() {
           </form>
 
           {/* Mode Switch Helper */}
-          <div className="mt-5 pt-4 border-t border-slate-800/80 text-center">
+          <div className="mt-5 pt-4 border-t border-slate-100 text-center">
             {mode === 'login' ? (
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500">
                 Don't have an account?{' '}
                 <button
                   type="button"
                   onClick={() => handleModeSwitch('signup')}
-                  className="text-[#e5a420] hover:text-[#f3b028] font-semibold cursor-pointer ml-1"
+                  className="text-[#147b73] hover:text-[#0f675f] font-semibold hover:underline cursor-pointer ml-1"
                 >
                   Create one now
                 </button>
               </p>
             ) : (
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500">
                 Already registered?{' '}
                 <button
                   type="button"
                   onClick={() => handleModeSwitch('login')}
-                  className="text-[#e5a420] hover:text-[#f3b028] font-semibold cursor-pointer ml-1"
+                  className="text-[#147b73] hover:text-[#0f675f] font-semibold hover:underline cursor-pointer ml-1"
                 >
                   Sign in here
                 </button>
@@ -318,8 +332,8 @@ export function LoginPage() {
         </div>
 
         {/* Security / Institutional Footer */}
-        <div className="flex items-center justify-center space-x-2 text-[11px] text-slate-500 mt-5">
-          <ShieldCheck className="w-3.5 h-3.5 text-slate-500" />
+        <div className="flex items-center justify-center space-x-1.5 text-[11px] text-slate-500 mt-5">
+          <ShieldCheck className="w-3.5 h-3.5 text-[#147b73]" />
           <span>256-bit encrypted · Session isolation active</span>
         </div>
       </div>

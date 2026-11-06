@@ -50,9 +50,9 @@ const ProtectedApp = () => {
   // 1. Session verification splash
   if (isLoading) {
     return (
-      <div className="min-h-screen w-screen flex flex-col items-center justify-center bg-[#0a1120] text-slate-300 select-none">
-        <div className="w-9 h-9 border-3 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4" />
-        <span className="text-xs uppercase tracking-widest font-semibold text-slate-400">
+      <div className="min-h-screen w-screen flex flex-col items-center justify-center bg-[#f3f6f9] text-slate-700 select-none">
+        <div className="w-10 h-10 border-3 border-[#147b73]/20 border-t-[#147b73] rounded-full animate-spin mb-4" />
+        <span className="text-xs uppercase tracking-widest font-semibold text-slate-500">
           Verifying Session · Zenius ScreenPro...
         </span>
       </div>
