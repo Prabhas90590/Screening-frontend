@@ -14,6 +14,7 @@ from fastapi import HTTPException, status
 
 from app.core.config import settings
 from app.core.logging import DiagnosticLogger
+from app.db.ownership import resolve_user_identity
 from app.models.screening_run import (
     FunnelCountRecord,
     ScreeningResultRecord,
@@ -108,31 +109,39 @@ class ScreeningService:
         return clean_countries, clean_exchanges
 
     async def initiate_screening_run(
-        self, request: ScreeningRunRequest, owner_email: Optional[str] = None
+        self,
+        request: ScreeningRunRequest,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> ScreeningRunResponse:
         """Validate screening request, resolve rules, ingest market data, and record the screening run."""
         start_time = time.perf_counter()
         now = datetime.now(timezone.utc)
-        target_owner = owner_email
-        if not target_owner:
+        target_user_id, target_owner = resolve_user_identity(user_id=user_id, owner_email=owner_email)
+        if not target_owner and not target_user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication required to run screening.",
             )
 
-        # 1. Resolve Rule Profile
+        # 1. Resolve Rule Profile strictly within the owning user's scope
         active_version = None
         if request.rule_version_id:
-            active_version = self.rule_repo.get_version_by_id(request.rule_version_id, owner_email=target_owner)
-            if not active_version:
-                active_version = self.rule_repo.get_version_by_id(request.rule_version_id)
+            active_version = self.rule_repo.get_version_by_id(
+                request.rule_version_id,
+                owner_email=target_owner,
+                user_id=target_user_id,
+            )
             if not active_version:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Rule profile '{request.rule_version_id}' not found in database.",
+                    detail=f"Rule profile '{request.rule_version_id}' not found for current user.",
                 )
         elif not request.rules_config:
-            active_version = self.rule_repo.get_active_version(owner_email=target_owner)
+            active_version = self.rule_repo.get_active_version(
+                owner_email=target_owner,
+                user_id=target_user_id,
+            )
 
         if active_version:
             v_num = getattr(active_version, "version_number", None) or "1.0"
@@ -146,7 +155,7 @@ class ScreeningService:
             rule_version_id = active_version.version_id
         else:
             profile_name = request.profile_name or "Custom Strategy"
-            rule_version_id = "prof-custom"
+            rule_version_id = None
 
         # 2. Resolve Countries and Exchanges (Inherit from Profile snapshot if omitted)
         req_countries = list(request.countries) if request.countries else []
@@ -216,6 +225,7 @@ class ScreeningService:
             trigger_type=getattr(request, "trigger_type", "instant") or "instant",
             notification_email=target_email,
             owner_email=target_owner,
+            user_id=target_user_id,
         )
         self.screening_repo.save_run(run_record)
 
@@ -317,6 +327,22 @@ class ScreeningService:
                 run_record.duration_ms = duration_ms
                 run_record.error_message = f"[{dbe.blocker_type}] {dbe.message}"
                 self.screening_repo.save_run(run_record)
+                self.screening_repo.save_funnel_counts(
+                    FunnelCountRecord(
+                        id=f"fnl-{run_id}",
+                        run_id=run_id,
+                        universe_count=len(screened_metrics),
+                        markets_count=len(screened_metrics),
+                        floors_count=0,
+                        gates_count=0,
+                        score_count=0,
+                        shortlist_count=0,
+                        selected_count=0,
+                        owner_email=target_owner,
+                        user_id=target_user_id,
+                        created_at=now,
+                    )
+                )
                 logger.calc_warn("DATA_BLOCKER", run_id, f"Run blocked by guardrail: {dbe.blocker_type} - {dbe.message}")
 
                 # Trigger Data Blocker Email Notification
@@ -508,6 +534,8 @@ class ScreeningService:
                     near_miss_status=near_miss_status,
                     score_breakdown=score_breakdown_dicts,
                     metric_statuses=metric_statuses,
+                    owner_email=target_owner,
+                    user_id=target_user_id,
                     created_at=now,
                 )
                 results_to_save.append(res_record)
@@ -597,6 +625,8 @@ class ScreeningService:
                     near_miss_status=near_miss_status,
                     score_breakdown=score_breakdown_dicts,
                     metric_statuses=metric_statuses,
+                    owner_email=target_owner,
+                    user_id=target_user_id,
                     created_at=now,
                 )
                 results_to_save.append(res_record)
@@ -621,6 +651,8 @@ class ScreeningService:
                 score_count=score_passed,
                 shortlist_count=shortlist_count,
                 selected_count=selected_count,
+                owner_email=target_owner,
+                user_id=target_user_id,
                 created_at=now,
             )
             self.screening_repo.save_funnel_counts(funnel_record)
@@ -695,13 +727,23 @@ class ScreeningService:
             )
             raise exc
 
-    def get_run(self, run_id: str) -> Optional[ScreeningRunRecord]:
-        """Fetch a specific screening run by its ID."""
-        return self.screening_repo.get_run(run_id)
+    def get_run(
+        self,
+        run_id: str,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Optional[ScreeningRunRecord]:
+        """Fetch a specific screening run by its ID, optionally scoped to owner."""
+        return self.screening_repo.get_run(run_id, owner_email=owner_email, user_id=user_id)
 
-    def list_runs(self, limit: int = 50, owner_email: Optional[str] = None) -> List[ScreeningRunRecord]:
+    def list_runs(
+        self,
+        limit: int = 50,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[ScreeningRunRecord]:
         """Fetch historical screening executions scoped to owner."""
-        return self.screening_repo.list_runs(limit=limit, owner_email=owner_email)
+        return self.screening_repo.list_runs(limit=limit, owner_email=owner_email, user_id=user_id)
 
 
 # Global screening service instance

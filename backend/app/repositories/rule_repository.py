@@ -6,9 +6,19 @@ import logging
 from typing import Any, List, Optional
 
 from app.db.connection import db_manager
+from app.db.ownership import build_owner_filter
 from app.models.rule import RuleRecord, RuleVersionRecord
 
 logger = logging.getLogger("app.repositories.rule")
+
+_VERSION_SELECT_COLS = (
+    "version_id, profile_name, version_number, is_active, description, sector_limits, "
+    "diversification_rules, changes, selected_countries, owner_email, created_at, updated_at, user_id"
+)
+_RULE_SELECT_COLS = (
+    "rule_id, version_id, metric_name, label, category, condition, "
+    "threshold_value, threshold_display, mode, weight, created_at, owner_email, user_id"
+)
 
 
 class RuleRepository:
@@ -71,9 +81,10 @@ class RuleRepository:
             cursor.execute(insert_sql, values)
 
             # If this is marked active, deactivate other profiles for THIS OWNER ONLY
-            if version.is_active and target_owner:
-                deact_sql = "UPDATE rule_versions SET is_active = FALSE WHERE version_id != %s AND LOWER(owner_email) = LOWER(%s)"
-                cursor.execute(deact_sql, (version.version_id, target_owner))
+            if version.is_active and (target_user_id or target_owner):
+                owner_clause, owner_params = build_owner_filter(user_id=target_user_id, owner_email=target_owner)
+                deact_sql = f"UPDATE rule_versions SET is_active = FALSE WHERE version_id != %s AND {owner_clause}"
+                cursor.execute(deact_sql, (version.version_id, *owner_params))
 
             conn.commit()
             return version.version_id
@@ -90,32 +101,15 @@ class RuleRepository:
             return None
 
         conn = db_manager.get_connection()
-
-        if user_id and owner_email:
-            query = (
-                "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, "
-                "diversification_rules, changes, selected_countries, owner_email, created_at, updated_at, user_id "
-                "FROM rule_versions WHERE is_active = TRUE AND (user_id = %s OR LOWER(owner_email) = LOWER(%s)) LIMIT 1"
-            )
-            params = (user_id, owner_email)
-        elif user_id:
-            query = (
-                "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, "
-                "diversification_rules, changes, selected_countries, owner_email, created_at, updated_at, user_id "
-                "FROM rule_versions WHERE is_active = TRUE AND user_id = %s LIMIT 1"
-            )
-            params = (user_id,)
-        else:
-            query = (
-                "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, "
-                "diversification_rules, changes, selected_countries, owner_email, created_at, updated_at, user_id "
-                "FROM rule_versions WHERE is_active = TRUE AND LOWER(owner_email) = LOWER(%s) LIMIT 1"
-            )
-            params = (owner_email,)
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
+        query = (
+            f"SELECT {_VERSION_SELECT_COLS} "
+            f"FROM rule_versions WHERE is_active = TRUE AND {owner_clause} LIMIT 1"
+        )
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, owner_params)
             row = cursor.fetchone()
             if not row:
                 versions = self.list_versions(owner_email=owner_email, user_id=user_id)
@@ -132,32 +126,15 @@ class RuleRepository:
             return []
 
         conn = db_manager.get_connection()
-
-        if user_id and owner_email:
-            query = (
-                "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, "
-                "diversification_rules, changes, selected_countries, owner_email, created_at, updated_at, user_id "
-                "FROM rule_versions WHERE (user_id = %s OR LOWER(owner_email) = LOWER(%s)) ORDER BY is_active DESC, updated_at DESC"
-            )
-            params = (user_id, owner_email)
-        elif user_id:
-            query = (
-                "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, "
-                "diversification_rules, changes, selected_countries, owner_email, created_at, updated_at, user_id "
-                "FROM rule_versions WHERE user_id = %s ORDER BY is_active DESC, updated_at DESC"
-            )
-            params = (user_id,)
-        else:
-            query = (
-                "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, "
-                "diversification_rules, changes, selected_countries, owner_email, created_at, updated_at, user_id "
-                "FROM rule_versions WHERE LOWER(owner_email) = LOWER(%s) ORDER BY is_active DESC, updated_at DESC"
-            )
-            params = (owner_email,)
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
+        query = (
+            f"SELECT {_VERSION_SELECT_COLS} "
+            f"FROM rule_versions WHERE {owner_clause} ORDER BY is_active DESC, updated_at DESC"
+        )
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, owner_params)
             rows = cursor.fetchall()
             if not rows:
                 return []
@@ -169,37 +146,24 @@ class RuleRepository:
         finally:
             conn.close()
 
-    def get_version_by_id(self, version_id: str, owner_email: Optional[str] = None, user_id: Optional[str] = None) -> Optional[RuleVersionRecord]:
-        """Fetch a specific rule profile by its version ID, optionally scoped to owner."""
-        conn = db_manager.get_connection()
+    def get_version_by_id(
+        self,
+        version_id: str,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+        allow_unscoped: bool = False,
+    ) -> Optional[RuleVersionRecord]:
+        """Fetch a specific rule profile by its version ID, scoped to owner by default."""
+        if not owner_email and not user_id and not allow_unscoped:
+            return None
 
-        if user_id and owner_email:
-            query = (
-                "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, "
-                "diversification_rules, changes, selected_countries, owner_email, created_at, updated_at, user_id "
-                "FROM rule_versions WHERE version_id = %s AND (user_id = %s OR LOWER(owner_email) = LOWER(%s))"
-            )
-            params = (version_id, user_id, owner_email)
-        elif user_id:
-            query = (
-                "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, "
-                "diversification_rules, changes, selected_countries, owner_email, created_at, updated_at, user_id "
-                "FROM rule_versions WHERE version_id = %s AND user_id = %s"
-            )
-            params = (version_id, user_id)
-        elif owner_email:
-            query = (
-                "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, "
-                "diversification_rules, changes, selected_countries, owner_email, created_at, updated_at, user_id "
-                "FROM rule_versions WHERE version_id = %s AND LOWER(owner_email) = LOWER(%s)"
-            )
-            params = (version_id, owner_email)
+        conn = db_manager.get_connection()
+        if owner_email or user_id:
+            owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
+            query = f"SELECT {_VERSION_SELECT_COLS} FROM rule_versions WHERE version_id = %s AND {owner_clause}"
+            params = (version_id, *owner_params)
         else:
-            query = (
-                "SELECT version_id, profile_name, version_number, is_active, description, sector_limits, "
-                "diversification_rules, changes, selected_countries, owner_email, created_at, updated_at, user_id "
-                "FROM rule_versions WHERE version_id = %s"
-            )
+            query = f"SELECT {_VERSION_SELECT_COLS} FROM rule_versions WHERE version_id = %s"
             params = (version_id,)
 
         try:
@@ -214,21 +178,28 @@ class RuleRepository:
         finally:
             conn.close()
 
-    def activate_version(self, version_id: str, owner_email: Optional[str] = None) -> bool:
+    def activate_version(
+        self, version_id: str, owner_email: Optional[str] = None, user_id: Optional[str] = None
+    ) -> bool:
         """Mark a profile as active and deactivate all other profiles for this owner."""
-        if not owner_email:
+        if not owner_email and not user_id:
             return False
 
         conn = db_manager.get_connection()
-        target_owner = owner_email
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
 
         try:
             cursor = conn.cursor()
-            deact_sql = "UPDATE rule_versions SET is_active = FALSE WHERE LOWER(owner_email) = LOWER(%s)"
-            cursor.execute(deact_sql, (target_owner,))
+            # Ensure target belongs to this owner before modifying anything
+            cursor.execute(f"SELECT 1 FROM rule_versions WHERE version_id = %s AND {owner_clause}", (version_id, *owner_params))
+            if not cursor.fetchone():
+                return False
 
-            act_sql = "UPDATE rule_versions SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP WHERE version_id = %s AND LOWER(owner_email) = LOWER(%s)"
-            cursor.execute(act_sql, (version_id, target_owner))
+            deact_sql = f"UPDATE rule_versions SET is_active = FALSE WHERE {owner_clause}"
+            cursor.execute(deact_sql, owner_params)
+
+            act_sql = f"UPDATE rule_versions SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP WHERE version_id = %s AND {owner_clause}"
+            cursor.execute(act_sql, (version_id, *owner_params))
             conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
@@ -238,23 +209,25 @@ class RuleRepository:
         finally:
             conn.close()
 
-    def delete_version(self, version_id: str, owner_email: Optional[str] = None) -> bool:
-        """Delete a rule profile and its associated rules."""
+    def delete_version(
+        self, version_id: str, owner_email: Optional[str] = None, user_id: Optional[str] = None
+    ) -> bool:
+        """Delete a rule profile and its associated rules only when owned by caller."""
+        if not owner_email and not user_id:
+            return False
+
         conn = db_manager.get_connection()
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
 
         try:
             cursor = conn.cursor()
-            # Rules cascade-delete via foreign key, but delete explicitly for safety
-            self.delete_rules_for_version(version_id)
-
-            if owner_email:
-                del_sql = "DELETE FROM rule_versions WHERE version_id = %s AND LOWER(owner_email) = LOWER(%s)"
-                cursor.execute(del_sql, (version_id, owner_email))
-            else:
-                del_sql = "DELETE FROM rule_versions WHERE version_id = %s"
-                cursor.execute(del_sql, (version_id,))
+            del_sql = f"DELETE FROM rule_versions WHERE version_id = %s AND {owner_clause}"
+            cursor.execute(del_sql, (version_id, *owner_params))
+            deleted = cursor.rowcount > 0
+            if deleted:
+                cursor.execute("DELETE FROM rules WHERE version_id = %s", (version_id,))
             conn.commit()
-            return cursor.rowcount > 0
+            return deleted
         except Exception as e:
             conn.rollback()
             logger.error(f"Failed to delete rule version '{version_id}': {e}")
@@ -290,14 +263,16 @@ class RuleRepository:
         insert_sql = """
             INSERT INTO rules (
                 rule_id, version_id, metric_name, label, category,
-                condition, threshold_value, threshold_display, mode, weight, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                condition, threshold_value, threshold_display, mode, weight, owner_email, user_id, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (rule_id) DO UPDATE SET
                 condition = EXCLUDED.condition,
                 threshold_value = EXCLUDED.threshold_value,
                 threshold_display = EXCLUDED.threshold_display,
                 mode = EXCLUDED.mode,
-                weight = EXCLUDED.weight;
+                weight = EXCLUDED.weight,
+                owner_email = COALESCE(EXCLUDED.owner_email, rules.owner_email),
+                user_id = COALESCE(EXCLUDED.user_id, rules.user_id);
         """
 
         values = (
@@ -311,6 +286,8 @@ class RuleRepository:
             rule.threshold_display,
             rule.mode,
             rule.weight,
+            rule.owner_email,
+            rule.user_id,
             rule.created_at,
         )
 
@@ -329,7 +306,7 @@ class RuleRepository:
     def get_rules_for_version(self, version_id: str) -> List[RuleRecord]:
         """Retrieve all individual rules configured for a profile version."""
         conn = db_manager.get_connection()
-        query = "SELECT * FROM rules WHERE version_id = %s"
+        query = f"SELECT {_RULE_SELECT_COLS} FROM rules WHERE version_id = %s"
 
         try:
             cursor = conn.cursor()
@@ -395,6 +372,8 @@ class RuleRepository:
             mode=row[8] or "Both",
             weight=float(row[9] or 0.0),
             created_at=row[10] if isinstance(row[10], datetime) else datetime.fromisoformat(str(row[10])),
+            owner_email=row[11] if len(row) > 11 else None,
+            user_id=row[12] if len(row) > 12 else None,
         )
 
 

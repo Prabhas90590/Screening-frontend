@@ -30,4 +30,6 @@ class HoldingRecord(BaseModel):
     shares: float = 0.0
     cost_basis: float = 0.0
     weight_pct: float = 0.0
+    owner_email: Optional[str] = None
+    user_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)

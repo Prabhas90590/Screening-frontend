@@ -14,6 +14,8 @@ class HoldingRecord(BaseModel):
     cost_basis: float = Field(default=0.0, description="Purchase cost basis per share or total")
     weight_pct: float = Field(default=0.0, description="Portfolio weighting percentage (0 to 100)")
     holding_rank: Optional[int] = Field(default=None, description="Rank in uploaded holdings")
+    owner_email: Optional[str] = Field(default=None, description="User email owning this holding")
+    user_id: Optional[str] = Field(default=None, description="User UUID owning this holding")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 

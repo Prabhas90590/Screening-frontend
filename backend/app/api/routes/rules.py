@@ -55,6 +55,7 @@ def _record_to_schema(version: RuleVersionRecord) -> RuleProfileSchema:
         changes=version.changes or [],
         selected_countries=version.selected_countries or [],
         owner_email=version.owner_email,
+        user_id=version.user_id,
         rules=rule_items,
         created_at=version.created_at,
         updated_at=version.updated_at,
@@ -96,11 +97,14 @@ def get_active_profile(current_user: Optional[UserRecord] = Depends(get_optional
 @router.get("/profiles/{version_id}", response_model=RuleProfileSchema)
 def get_profile(version_id: str, current_user: Optional[UserRecord] = Depends(get_optional_user)):
     """Retrieve a specific profile by its version ID."""
-    user_email = current_user.email if current_user else None
-    user_id = current_user.id if current_user else None
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to view a profile.",
+        )
+    user_email = current_user.email
+    user_id = current_user.id
     version = rule_repository.get_version_by_id(version_id, owner_email=user_email, user_id=user_id)
-    if not version and not current_user:
-        version = rule_repository.get_version_by_id(version_id)
     if not version:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -202,6 +206,8 @@ def create_profile(
                     threshold_display=spec.default_display,
                     mode="Both" if spec.default_weight > 0 else "Off",
                     weight=spec.default_weight,
+                    owner_email=user_email,
+                    user_id=user_id,
                     created_at=now,
                 )
             )
@@ -219,11 +225,13 @@ def create_profile(
                     threshold_display=r.value_display or f"{r.condition} {r.value}",
                     mode=r.mode,
                     weight=r.weight,
+                    owner_email=user_email,
+                    user_id=user_id,
                     created_at=now,
                 )
             )
 
-    saved_version = rule_repository.get_version_by_id(version_id, owner_email=user_email)
+    saved_version = rule_repository.get_version_by_id(version_id, owner_email=user_email, user_id=user_id)
     if not saved_version:
         raise HTTPException(status_code=500, detail="Failed to retrieve created profile.")
 
@@ -286,6 +294,8 @@ def update_profile(
                     threshold_display=r.value_display or f"{r.condition} {r.value}",
                     mode=r.mode,
                     weight=r.weight,
+                    owner_email=existing.owner_email or user_email,
+                    user_id=existing.user_id or user_id,
                     created_at=now,
                 )
             )
@@ -318,7 +328,7 @@ def activate_profile(
             detail=f"Profile '{version_id}' not found."
         )
 
-    rule_repository.activate_version(version_id, owner_email=user_email)
+    rule_repository.activate_version(version_id, owner_email=user_email, user_id=user_id)
     updated = rule_repository.get_version_by_id(version_id, owner_email=user_email, user_id=user_id)
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to activate profile.")
@@ -347,6 +357,6 @@ def delete_profile(
             detail=f"Profile '{version_id}' not found."
         )
 
-    rule_repository.delete_version(version_id, owner_email=user_email)
+    rule_repository.delete_version(version_id, owner_email=user_email, user_id=user_id)
     logger.rule_info("DELETE", existing.profile_name, f"Deleted profile '{version_id}'")
     return {"status": "deleted", "version_id": version_id, "profile_name": existing.profile_name}

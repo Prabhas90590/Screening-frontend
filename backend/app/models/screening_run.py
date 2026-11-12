@@ -39,6 +39,8 @@ class FunnelCountRecord(BaseModel):
     score_count: int = 0
     shortlist_count: int = 0
     selected_count: int = 0
+    owner_email: Optional[str] = Field(default=None, description="User email owning this funnel record")
+    user_id: Optional[str] = Field(default=None, description="User UUID owning this funnel record")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -75,4 +77,6 @@ class ScreeningResultRecord(BaseModel):
     near_miss_status: Literal["none", "rank_near_miss", "rule_near_miss"] = "none"
     score_breakdown: List[Dict[str, Any]] = Field(default_factory=list)
     metric_statuses: Dict[str, str] = Field(default_factory=dict)
+    owner_email: Optional[str] = Field(default=None, description="User email owning this result")
+    user_id: Optional[str] = Field(default=None, description="User UUID owning this result")
     created_at: datetime = Field(default_factory=datetime.utcnow)

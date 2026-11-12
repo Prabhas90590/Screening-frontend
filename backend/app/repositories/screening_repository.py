@@ -6,6 +6,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from app.db.connection import db_manager
+from app.db.ownership import build_owner_filter
 from app.models.screening_run import (
     FunnelCountRecord,
     ScreeningResultRecord,
@@ -33,9 +34,9 @@ class ScreeningRepository:
             INSERT INTO screening_runs (
                 run_id, status, provider, rule_version_id, profile_name,
                 display_currency, selected_countries, selected_exchanges,
-                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type, notification_email, owner_email
+                rules_snapshot, duration_ms, started_at, completed_at, error_message, trigger_type, notification_email, owner_email, user_id
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (run_id) DO UPDATE SET
                 status = EXCLUDED.status,
@@ -44,7 +45,8 @@ class ScreeningRepository:
                 error_message = EXCLUDED.error_message,
                 trigger_type = EXCLUDED.trigger_type,
                 notification_email = EXCLUDED.notification_email,
-                owner_email = COALESCE(EXCLUDED.owner_email, screening_runs.owner_email);
+                owner_email = COALESCE(EXCLUDED.owner_email, screening_runs.owner_email),
+                user_id = COALESCE(EXCLUDED.user_id, screening_runs.user_id);
         """
 
         countries_json = json.dumps(run.selected_countries)
@@ -68,6 +70,7 @@ class ScreeningRepository:
             run.trigger_type or "instant",
             run.notification_email,
             run.owner_email,
+            run.user_id,
         )
 
         try:
@@ -82,10 +85,7 @@ class ScreeningRepository:
         finally:
             conn.close()
 
-    def get_run(self, run_id: str) -> Optional[ScreeningRunRecord]:
-        """Fetch screening run by ID with joined funnel counts."""
-        conn = db_manager.get_connection()
-        query = """
+    _RUN_SELECT_SQL = """
             SELECT 
                 r.run_id, r.status, r.provider, r.rule_version_id, r.profile_name,
                 r.display_currency, r.selected_countries, r.selected_exchanges,
@@ -95,15 +95,32 @@ class ScreeningRepository:
                 COALESCE(f.selected_count, 0) as selected_count,
                 COALESCE(r.trigger_type, 'instant') as trigger_type,
                 r.notification_email,
-                r.owner_email
+                r.owner_email,
+                r.user_id
             FROM screening_runs r
             LEFT JOIN funnel_counts f ON r.run_id = f.run_id
-            WHERE r.run_id = %s
-        """
+    """
+
+    def get_run(
+        self,
+        run_id: str,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Optional[ScreeningRunRecord]:
+        """Fetch screening run by ID (optionally scoped to owner) with joined funnel counts."""
+        conn = db_manager.get_connection()
+        conditions = ["r.run_id = %s"]
+        params: list = [run_id]
+        if owner_email or user_id:
+            owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email, alias="r")
+            conditions.append(owner_clause)
+            params.extend(owner_params)
+
+        query = f"{self._RUN_SELECT_SQL} WHERE {' AND '.join(conditions)}"
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query, (run_id,))
+            cursor.execute(query, tuple(params))
             row = cursor.fetchone()
             if not row:
                 return None
@@ -113,29 +130,23 @@ class ScreeningRepository:
         finally:
             conn.close()
 
-    def list_runs(self, limit: int = 50, owner_email: Optional[str] = None) -> List[ScreeningRunRecord]:
-        """List historical screening runs ordered by start time descending."""
-        if not owner_email:
+    def list_runs(
+        self,
+        limit: int = 50,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[ScreeningRunRecord]:
+        """List historical screening runs ordered by start time descending for the owner."""
+        if not owner_email and not user_id:
             return []
 
         conn = db_manager.get_connection()
-        where_clause = "WHERE LOWER(r.owner_email) = LOWER(%s)"
-        params: list = [owner_email, limit]
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email, alias="r")
+        params: list = [*owner_params, limit]
 
         query = f"""
-            SELECT 
-                r.run_id, r.status, r.provider, r.rule_version_id, r.profile_name,
-                r.display_currency, r.selected_countries, r.selected_exchanges,
-                r.rules_snapshot, r.duration_ms, r.started_at, r.completed_at,
-                r.error_message,
-                COALESCE(f.universe_count, 0) as universe_count,
-                COALESCE(f.selected_count, 0) as selected_count,
-                COALESCE(r.trigger_type, 'instant') as trigger_type,
-                r.notification_email,
-                r.owner_email
-            FROM screening_runs r
-            LEFT JOIN funnel_counts f ON r.run_id = f.run_id
-            {where_clause}
+            {self._RUN_SELECT_SQL}
+            WHERE {owner_clause}
             ORDER BY r.started_at DESC
             LIMIT %s
         """
@@ -149,16 +160,35 @@ class ScreeningRepository:
         finally:
             conn.close()
 
-    def delete_run(self, run_id: str) -> bool:
-        """Permanently delete a single screening run and its associated records."""
+    def delete_run(
+        self,
+        run_id: str,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        """Permanently delete a single screening run owned by caller and its associated records."""
+        if not owner_email and not user_id:
+            return False
+
         conn = db_manager.get_connection()
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
         try:
             cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT run_id FROM screening_runs WHERE run_id = %s AND {owner_clause}",
+                (run_id, *owner_params),
+            )
+            if not cursor.fetchone():
+                return False
+
             cursor.execute("DELETE FROM screening_results WHERE run_id = %s", (run_id,))
             cursor.execute("DELETE FROM funnel_counts WHERE run_id = %s", (run_id,))
             cursor.execute("DELETE FROM raw_responses WHERE run_id = %s", (run_id,))
             cursor.execute("DELETE FROM decisions WHERE run_id = %s", (run_id,))
-            cursor.execute("DELETE FROM screening_runs WHERE run_id = %s", (run_id,))
+            cursor.execute(
+                f"DELETE FROM screening_runs WHERE run_id = %s AND {owner_clause}",
+                (run_id, *owner_params),
+            )
             deleted = cursor.rowcount > 0
             conn.commit()
             logger.info(f"[REPOSITORY:DELETE_RUN] Successfully deleted run '{run_id}' (affected: {deleted})")
@@ -170,19 +200,34 @@ class ScreeningRepository:
         finally:
             conn.close()
 
-    def clear_all_runs(self) -> int:
-        """Permanently delete all screening runs and their results."""
+    def clear_all_runs(
+        self,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> int:
+        """Permanently delete all screening runs and results belonging strictly to caller."""
+        if not owner_email and not user_id:
+            return 0
+
         conn = db_manager.get_connection()
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
         try:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM screening_results")
-            cursor.execute("DELETE FROM funnel_counts")
-            cursor.execute("DELETE FROM raw_responses")
-            cursor.execute("DELETE FROM decisions")
-            cursor.execute("DELETE FROM screening_runs")
+            cursor.execute(f"SELECT run_id FROM screening_runs WHERE {owner_clause}", owner_params)
+            run_ids = [r[0] for r in cursor.fetchall()]
+            if not run_ids:
+                return 0
+
+            placeholders = ",".join(["%s"] * len(run_ids))
+            run_params = tuple(run_ids)
+            cursor.execute(f"DELETE FROM screening_results WHERE run_id IN ({placeholders})", run_params)
+            cursor.execute(f"DELETE FROM funnel_counts WHERE run_id IN ({placeholders})", run_params)
+            cursor.execute(f"DELETE FROM raw_responses WHERE run_id IN ({placeholders})", run_params)
+            cursor.execute(f"DELETE FROM decisions WHERE run_id IN ({placeholders})", run_params)
+            cursor.execute(f"DELETE FROM screening_runs WHERE run_id IN ({placeholders})", run_params)
             count = cursor.rowcount
             conn.commit()
-            logger.info("[REPOSITORY:CLEAR_RUNS] Successfully cleared all screening runs")
+            logger.info(f"[REPOSITORY:CLEAR_RUNS] Successfully cleared {count} screening runs for owner")
             return count
         except Exception as e:
             conn.rollback()
@@ -202,8 +247,8 @@ class ScreeningRepository:
         insert_sql = """
             INSERT INTO funnel_counts (
                 id, run_id, universe_count, markets_count, floors_count,
-                gates_count, score_count, shortlist_count, selected_count, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                gates_count, score_count, shortlist_count, selected_count, owner_email, user_id, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (run_id) DO UPDATE SET
                 universe_count = EXCLUDED.universe_count,
                 markets_count = EXCLUDED.markets_count,
@@ -211,7 +256,9 @@ class ScreeningRepository:
                 gates_count = EXCLUDED.gates_count,
                 score_count = EXCLUDED.score_count,
                 shortlist_count = EXCLUDED.shortlist_count,
-                selected_count = EXCLUDED.selected_count;
+                selected_count = EXCLUDED.selected_count,
+                owner_email = COALESCE(EXCLUDED.owner_email, funnel_counts.owner_email),
+                user_id = COALESCE(EXCLUDED.user_id, funnel_counts.user_id);
         """
 
         values = (
@@ -224,6 +271,8 @@ class ScreeningRepository:
             funnel.score_count,
             funnel.shortlist_count,
             funnel.selected_count,
+            funnel.owner_email,
+            funnel.user_id,
             funnel.created_at,
         )
 
@@ -242,7 +291,11 @@ class ScreeningRepository:
     def get_funnel_counts(self, run_id: str) -> Optional[FunnelCountRecord]:
         """Fetch funnel counts for a specific run."""
         conn = db_manager.get_connection()
-        query = "SELECT * FROM funnel_counts WHERE run_id = %s"
+        query = (
+            "SELECT id, run_id, universe_count, markets_count, floors_count, "
+            "gates_count, score_count, shortlist_count, selected_count, created_at, owner_email, user_id "
+            "FROM funnel_counts WHERE run_id = %s"
+        )
 
         try:
             cursor = conn.cursor()
@@ -261,6 +314,8 @@ class ScreeningRepository:
                 shortlist_count=row[7],
                 selected_count=row[8],
                 created_at=row[9] if isinstance(row[9], datetime) else datetime.fromisoformat(str(row[9])),
+                owner_email=row[10],
+                user_id=row[11],
             )
         finally:
             conn.close()
@@ -288,13 +343,15 @@ class ScreeningRepository:
                     fwd_pe, peg, ev_ebitda, beta, nd_ebitda, yield_pct, eps_growth_pct,
                     pe_vs_benchmark, price_to_sales, price_to_cash_flow, revenue_growth_fwd, avg_daily_volume, avg_daily_traded_value,
                     data_confidence, stage_status, near_miss_status,
-                    score_breakdown, metric_statuses, created_at
+                    score_breakdown, metric_statuses, owner_email, user_id, created_at
                 ) VALUES %s
                 ON CONFLICT (id) DO UPDATE SET
                     rank = EXCLUDED.rank,
                     score = EXCLUDED.score,
                     display_price = EXCLUDED.display_price,
-                    market_cap_display = EXCLUDED.market_cap_display;
+                    market_cap_display = EXCLUDED.market_cap_display,
+                    owner_email = COALESCE(EXCLUDED.owner_email, screening_results.owner_email),
+                    user_id = COALESCE(EXCLUDED.user_id, screening_results.user_id);
             """
             value_tuples = [
                 (
@@ -329,6 +386,8 @@ class ScreeningRepository:
                     r.near_miss_status,
                     json.dumps(r.score_breakdown),
                     json.dumps(r.metric_statuses),
+                    r.owner_email,
+                    r.user_id,
                     r.created_at,
                 )
                 for r in deduped_results
@@ -429,6 +488,7 @@ class ScreeningRepository:
                 trigger_type=row.get("trigger_type") or "instant",
                 notification_email=row.get("notification_email"),
                 owner_email=row.get("owner_email"),
+                user_id=row.get("user_id"),
             )
         else:
             return ScreeningRunRecord(
@@ -450,6 +510,7 @@ class ScreeningRepository:
                 trigger_type=row[15] if len(row) > 15 and row[15] is not None else "instant",
                 notification_email=row[16] if len(row) > 16 else None,
                 owner_email=row[17] if len(row) > 17 else None,
+                user_id=row[18] if len(row) > 18 else None,
             )
 
     def _row_to_result(self, row: Any) -> ScreeningResultRecord:
@@ -502,6 +563,8 @@ class ScreeningRepository:
                 near_miss_status=row.get("near_miss_status") or "none",
                 score_breakdown=score_b,
                 metric_statuses=metrics_s,
+                owner_email=row.get("owner_email"),
+                user_id=row.get("user_id"),
                 created_at=created,
             )
         else:

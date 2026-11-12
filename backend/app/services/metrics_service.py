@@ -44,7 +44,7 @@ class MetricsService:
       4. Write the computed derived ratios back to company_metrics
     """
 
-    def run_batch_metrics(self, limit: int = 500) -> MetricsBatchResult:
+    def run_batch_metrics(self, limit: int = 5000) -> MetricsBatchResult:
         """
         Run metrics engine for all companies in company_metrics table.
 
@@ -54,7 +54,7 @@ class MetricsService:
           - Will be called by Run Manager (Phase 13) before each screening run
 
         Args:
-            limit: Max companies to process in one batch (default 500)
+            limit: Max companies to process in one batch (default 5000)
 
         Returns:
             MetricsBatchResult summary with counts and timing

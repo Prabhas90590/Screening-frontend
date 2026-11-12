@@ -21,6 +21,8 @@ class RuleRecord(BaseModel):
     threshold_display: str = Field(default="", description="Display text, e.g. '3.0x' or '$500M'")
     mode: str = Field(default="Both", description="Mode: 'Off', 'Req.', 'Score', 'Both'")
     weight: float = Field(default=0.0, description="Weight percentage in scoring engine (0-100)")
+    owner_email: Optional[str] = Field(default=None, description="User email owning this rule")
+    user_id: Optional[str] = Field(default=None, description="User UUID owning this rule")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 

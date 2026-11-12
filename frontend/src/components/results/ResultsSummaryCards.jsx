@@ -62,17 +62,25 @@ export const ResultsSummaryCards = () => {
     return isRankMiss || isRuleMiss;
   });
 
-  const totalUniverse = currentRun?.screened || (securities.length > 0 ? securities.length : 112);
-  const selectedCount = top20Securities.length > 0 ? top20Securities.length : (currentRun?.selected || 20);
+  const isRunHalted = currentRun?.status === 'Blocked' || currentRun?.status === 'Failed';
+  const hasRunCounts = typeof currentRun?.screened === 'number';
+  const totalUniverse = hasRunCounts
+    ? currentRun.screened
+    : (securities.length > 0 ? securities.length : 112);
+  const selectedCount = isRunHalted
+    ? 0
+    : top20Securities.length > 0
+      ? top20Securities.length
+      : (typeof currentRun?.selected === 'number' ? currentRun.selected : 20);
 
   // Compute average score of Top 20
   const avgScore = top20Securities.length > 0
     ? (top20Securities.reduce((acc, s) => acc + (s.score || 0), 0) / top20Securities.length).toFixed(1)
-    : '84.2';
+    : (isRunHalted ? '0.0' : '84.2');
 
   // Distinct sectors represented
   const sectorsSet = new Set(top20Securities.map((s) => s.sector).filter(Boolean));
-  const sectorsCount = sectorsSet.size > 0 ? sectorsSet.size : 6;
+  const sectorsCount = sectorsSet.size > 0 ? sectorsSet.size : (isRunHalted ? 0 : 6);
 
   // Active run metadata
   const runIdDisplay = currentRun?.run || selectedRunId || 'run-latest';
@@ -93,6 +101,24 @@ export const ResultsSummaryCards = () => {
 
   return (
     <div className="space-y-3">
+      {isRunHalted && (
+        <div
+          className={`rounded-lg border px-3.5 py-2.5 text-xs flex items-start justify-between gap-3 ${
+            currentRun.status === 'Blocked'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-rose-50 border-rose-200 text-rose-900'
+          }`}
+        >
+          <div>
+            <span className="font-semibold">
+              {currentRun.status === 'Blocked'
+                ? 'Run blocked by data guardrail:'
+                : 'Screening run failed:'}
+            </span>{' '}
+            <span>{currentRun.error_message || 'No securities were selected for this run.'}</span>
+          </div>
+        </div>
+      )}
       {/* 3 Dynamic KPI Cards for Current Run */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
         {/* CARD 1: Current Run Portfolio & Winners */}

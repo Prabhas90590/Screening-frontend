@@ -351,6 +351,20 @@ class MockAdapter(BaseDataProvider):
         logger.provider_info("MOCK", f"Found {len(listings)} listings for {norm_country}/{norm_exchange}")
         return listings
 
+    def _normalize_mock_payload(
+        self, raw: Dict[str, Any], exchange_id: str
+    ) -> NormalizedSecurityData:
+        """Normalize a mock fixture payload with a fresh observation date.
+
+        Static fixture files carry fixed snapshot dates (e.g. 2026-11-03) that
+        would otherwise age past DataBlockerService's 3-business-day staleness
+        guardrail; refresh as_of_date to today unless simulate_stale is set.
+        """
+        fresh_raw = (
+            raw if raw.get("simulate_stale") else {**raw, "as_of_date": str(date.today())}
+        )
+        return normalize_vendor_payload(fresh_raw, default_exchange=exchange_id)
+
     async def fetch_security_data(
         self, ticker: str, exchange_id: str
     ) -> Optional[NormalizedSecurityData]:
@@ -361,7 +375,7 @@ class MockAdapter(BaseDataProvider):
         for raw in self._securities:
             cand_ticker = (raw.get("ticker") or raw.get("Code", "")).upper()
             if cand_ticker == clean_ticker:
-                return normalize_vendor_payload(raw, default_exchange=exchange_id)
+                return self._normalize_mock_payload(raw, exchange_id)
 
         logger.provider_warn("MOCK", f"Ticker '{clean_ticker}' not found in mock fixtures.")
         return None
@@ -387,7 +401,7 @@ class MockAdapter(BaseDataProvider):
 
             cand_ticker = (raw.get("ticker") or raw.get("Code", "")).upper()
             if filter_set is None or cand_ticker in filter_set:
-                norm_data = normalize_vendor_payload(raw, default_exchange=exchange_id)
+                norm_data = self._normalize_mock_payload(raw, exchange_id)
                 results.append(norm_data)
 
         logger.provider_info("MOCK", f"Normalized and returned {len(results)} securities for '{exchange_id}'")

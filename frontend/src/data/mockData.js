@@ -1010,7 +1010,7 @@ export const INITIAL_FUNNEL = {
 };
 
 export const INITIAL_SCHEDULE = {
-  profile: 'None',
+  profile: '',
   frequency: 'Daily',
   dailyType: 'trading_days',
   activeDays: ['mon', 'tue', 'wed', 'thu', 'fri'],

@@ -98,7 +98,8 @@ export function AuthProvider({ children }) {
 
       try {
         const profile = await fetchMeApi(savedToken);
-        if (isMounted && profile && profile.id) {
+        if (!isMounted) return;
+        if (profile && profile.id) {
           setUser(profile);
           setToken(savedToken);
           lastActivityRef.current = Date.now();

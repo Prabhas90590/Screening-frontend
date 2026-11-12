@@ -263,10 +263,11 @@ export const ScheduleConfigCard = () => {
   const isEditing = Boolean(scheduleConfig?.scheduleId);
 
   const handleSelectScheduleToEdit = (s) => {
+    const cleanProfName = s.profile_name && s.profile_name !== 'None' ? s.profile_name : '';
     updateScheduleConfig({
       scheduleId: s.schedule_id,
-      profile: s.profile_name,
-      selectedProfileId: s.profile_id,
+      profile: cleanProfName,
+      selectedProfileId: s.profile_id || '',
       frequency: s.frequency,
       dailyType: s.daily_type || 'trading_days',
       activeDays: s.active_days || ['mon', 'tue', 'wed', 'thu', 'fri'],
@@ -361,7 +362,14 @@ export const ScheduleConfigCard = () => {
     setIsSaving(true);
     try {
       if (saveScheduleToBackend) {
-        await saveScheduleToBackend({}, forceNew);
+        // Persist the currently displayed strategy profile even if the user did not manually re-select the dropdown.
+        const profileOverrides = selectedProfile
+          ? {
+              selectedProfileId: selectedProfile.id,
+              profile: `${selectedProfile.name} - Version ${selectedProfile.versionNumber}`,
+            }
+          : {};
+        await saveScheduleToBackend(profileOverrides, forceNew);
       }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);

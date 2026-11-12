@@ -157,6 +157,8 @@ CREATE TABLE IF NOT EXISTS rule_versions (
     diversification_rules JSONB DEFAULT '{}',
     changes JSONB DEFAULT '[]',
     selected_countries JSONB DEFAULT '[]',
+    owner_email VARCHAR(255),
+    user_id VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -172,6 +174,8 @@ CREATE TABLE IF NOT EXISTS rules (
     threshold_display VARCHAR(32) NOT NULL DEFAULT '',
     mode VARCHAR(16) NOT NULL DEFAULT 'Both',
     weight DOUBLE PRECISION DEFAULT 0.0,
+    owner_email VARCHAR(255),
+    user_id VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_rules_version ON rules(version_id, metric_name);
@@ -185,13 +189,15 @@ CREATE TABLE IF NOT EXISTS screening_runs (
     display_currency VARCHAR(8) DEFAULT 'USD',
     selected_countries JSONB DEFAULT '[]',
     selected_exchanges JSONB DEFAULT '[]',
-    selected_countries JSONB DEFAULT '[]',
     rules_snapshot JSONB DEFAULT '[]',
     duration_ms DOUBLE PRECISION DEFAULT 0.0,
     started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP WITH TIME ZONE,
     error_message TEXT,
-    trigger_type VARCHAR(32) DEFAULT 'instant'
+    trigger_type VARCHAR(32) DEFAULT 'instant',
+    notification_email TEXT,
+    owner_email VARCHAR(255),
+    user_id VARCHAR(100)
 );
 CREATE INDEX IF NOT EXISTS idx_screening_runs_status ON screening_runs(status);
 CREATE INDEX IF NOT EXISTS idx_screening_runs_started ON screening_runs(started_at DESC);
@@ -206,6 +212,8 @@ CREATE TABLE IF NOT EXISTS funnel_counts (
     score_count INTEGER NOT NULL DEFAULT 0,
     shortlist_count INTEGER NOT NULL DEFAULT 0,
     selected_count INTEGER NOT NULL DEFAULT 0,
+    owner_email VARCHAR(255),
+    user_id VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -241,6 +249,8 @@ CREATE TABLE IF NOT EXISTS screening_results (
     near_miss_status VARCHAR(32) DEFAULT 'none',
     score_breakdown JSONB DEFAULT '[]',
     metric_statuses JSONB DEFAULT '{}',
+    owner_email VARCHAR(255),
+    user_id VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_screening_results_run_rank ON screening_results(run_id, rank);
@@ -271,6 +281,8 @@ CREATE TABLE IF NOT EXISTS holdings (
     cost_basis DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     weight_pct DOUBLE PRECISION DEFAULT 0.0,
     holding_rank INTEGER DEFAULT NULL,
+    owner_email VARCHAR(255),
+    user_id VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -482,7 +494,8 @@ CREATE TABLE IF NOT EXISTS audit_events (
     event_id VARCHAR(64) PRIMARY KEY,
     event_type VARCHAR(64) NOT NULL,
     entity_id VARCHAR(64),
-    user_id VARCHAR(64) DEFAULT 'analyst',
+    user_id VARCHAR(100),
+    owner_email VARCHAR(255),
     details JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -669,35 +682,40 @@ class DatabaseManager:
             cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMP WITH TIME ZONE;")
             cursor.execute("ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR(32) DEFAULT 'instant';")
             cursor.execute("ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS notification_email TEXT;")
-            # Phase 9: Data Ownership & Scoping (Multi-user isolation)
-            cursor.execute("ALTER TABLE rule_versions ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);")
-            cursor.execute("ALTER TABLE rule_versions ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255);")
-            cursor.execute("ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);")
-            cursor.execute("ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255);")
-            cursor.execute("ALTER TABLE decisions ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);")
-            cursor.execute("ALTER TABLE decisions ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255);")
-            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);")
-            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255);")
+            # Phase 9+: Data Ownership & Scoping (Multi-user isolation)
+            for owned_tbl in (
+                "rule_versions", "rules", "screening_runs", "funnel_counts",
+                "screening_results", "decisions", "holdings", "audit_events",
+                "schedules", "schedules_daily", "schedules_weekly", "schedules_monthly", "schedules_custom"
+            ):
+                cursor.execute(f"ALTER TABLE {owned_tbl} ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);")
+                cursor.execute(f"ALTER TABLE {owned_tbl} ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255);")
+
+            cursor.execute("ALTER TABLE audit_events ALTER COLUMN user_id DROP DEFAULT;")
+            cursor.execute("UPDATE audit_events SET user_id = NULL WHERE user_id = 'analyst';")
+
             cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;")
             cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code VARCHAR(64);")
             cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires_at TIMESTAMP WITH TIME ZONE;")
             cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(64);")
             cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires_at TIMESTAMP WITH TIME ZONE;")
-            # Backfill unassigned legacy work dynamically to the primary registered user in the database
-            cursor.execute("SELECT id, email FROM users ORDER BY created_at ASC LIMIT 1;")
-            primary_user = cursor.fetchone()
-            if primary_user:
-                p_id, p_email = primary_user[0], primary_user[1]
-                cursor.execute("UPDATE rule_versions SET user_id = %s, owner_email = %s WHERE user_id IS NULL OR user_id = '';", (p_id, p_email))
-                cursor.execute("UPDATE screening_runs SET user_id = %s, owner_email = %s WHERE user_id IS NULL OR user_id = '';", (p_id, p_email))
-                cursor.execute("UPDATE decisions SET user_id = %s, owner_email = %s WHERE user_id IS NULL OR user_id = '';", (p_id, p_email))
-                cursor.execute("UPDATE schedules SET user_id = %s, owner_email = %s WHERE user_id IS NULL OR user_id = '';", (p_id, p_email))
+
+            from app.db.ownership import reconcile_ownership_with_cursor
+
+            # Relational backfill & reconciliation: match owner_email <-> users.id dynamically without hardcoding
+            reconcile_ownership_with_cursor(cursor)
+
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_rule_versions_user_id ON rule_versions(user_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_rule_versions_owner ON rule_versions(owner_email);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_rules_user_id ON rules(user_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_screening_runs_user_id ON screening_runs(user_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_screening_runs_owner ON screening_runs(owner_email);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_screening_results_user_id ON screening_results(user_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_funnel_counts_user_id ON funnel_counts(user_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_decisions_user_id ON decisions(user_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_decisions_owner ON decisions(owner_email);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_holdings_user_id ON holdings(user_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_holdings_owner ON holdings(owner_email);")
             conn.commit()
             logger.info("PostgreSQL persistence tables verified/created successfully.")
             self._initialized = True

@@ -5,11 +5,13 @@ and human investment decisions with full auditability and persistence.
 """
 
 from datetime import datetime
+import hashlib
 import logging
 import re
 from typing import List, Optional
 
 from app.db.connection import db_manager
+from app.db.ownership import resolve_user_identity
 from app.models.decision import DecisionRecord
 from app.repositories.decision_repository import decision_repository
 from app.schemas.decision import DecisionUpdateRequest, DecisionBulkSyncRequest, DecisionResponse
@@ -96,26 +98,69 @@ class DecisionService:
         profile_name: Optional[str],
         run_id: Optional[str],
         owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> str:
-        """Generate consistent decision ID scoped to user so different analysts never overwrite each other."""
-        owner = owner_email or "analyst"
-        user_slug = self._clean_slug(owner.split('@')[0])
+        """Generate consistent decision ID scoped to user (<=64 chars) so accounts never overwrite each other."""
+        if user_id and user_id.strip():
+            user_key = re.sub(r"[^a-zA-Z0-9]", "", user_id)[:8].lower()
+        elif owner_email and owner_email.strip():
+            user_key = self._clean_slug(owner_email.split("@")[0])[:12]
+        else:
+            raise ValueError("Authenticated user identity is required to generate a decision ID.")
+
         if profile_name and profile_name.strip():
-            slug = self._clean_slug(profile_name)
-            return f"dec-{user_slug}-{slug}-{canonical_id}"
-        if run_id and run_id.strip():
-            return f"dec-{user_slug}-{run_id.strip()}-{canonical_id}"
-        return f"dec-{user_slug}-{canonical_id}"
+            raw_id = f"dec-{user_key}-{self._clean_slug(profile_name)}-{canonical_id}"
+        elif run_id and run_id.strip():
+            raw_id = f"dec-{user_key}-{run_id.strip()}-{canonical_id}"
+        else:
+            raw_id = f"dec-{user_key}-{canonical_id}"
+
+        if len(raw_id) <= 64:
+            return raw_id
+        digest = hashlib.sha1(raw_id.encode("utf-8")).hexdigest()[:12]
+        return f"dec-{user_key}-{digest}-{canonical_id}"[:64]
+
+    @staticmethod
+    def _to_response(rec: DecisionRecord) -> DecisionResponse:
+        return DecisionResponse(
+            decision_id=rec.decision_id,
+            canonical_company_id=rec.canonical_company_id,
+            company_name=rec.company_name,
+            profile_name=rec.profile_name,
+            decision=rec.decision,
+            decision_reason=rec.decision_reason,
+            decision_note=rec.decision_note,
+            run_id=rec.run_id,
+            decided_by=rec.decided_by,
+            owner_email=rec.owner_email,
+            user_id=rec.user_id,
+            updated_at=rec.updated_at,
+        )
 
     def record_decision(
-        self, req: DecisionUpdateRequest, owner_email: Optional[str] = None
+        self,
+        req: DecisionUpdateRequest,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> DecisionResponse:
         """Create or update an analyst decision for a security."""
         now = datetime.utcnow()
-        target_owner = owner_email or req.owner_email or "analyst"
+        target_user_id, target_owner = resolve_user_identity(
+            user_id=user_id,
+            owner_email=owner_email or req.owner_email,
+        )
+        if not target_user_id and not target_owner:
+            raise ValueError("Authenticated user is required to record a decision.")
+
         canonical_id = self._resolve_canonical_company_id(req.canonical_company_id)
         comp_name = self._resolve_company_name(canonical_id, req.company_name)
-        dec_id = self._compute_decision_id(canonical_id, req.profile_name, req.run_id, owner_email=target_owner)
+        dec_id = self._compute_decision_id(
+            canonical_id,
+            req.profile_name,
+            req.run_id,
+            owner_email=target_owner,
+            user_id=target_user_id,
+        )
 
         dec_record = DecisionRecord(
             decision_id=dec_id,
@@ -126,8 +171,9 @@ class DecisionService:
             decision_reason=req.decision_reason,
             decision_note=req.decision_note,
             run_id=req.run_id,
-            decided_by=getattr(req, "decided_by", "Analyst") or "Analyst",
+            decided_by=getattr(req, "decided_by", None) or target_owner or "User",
             owner_email=target_owner,
+            user_id=target_user_id,
             created_at=now,
             updated_at=now,
         )
@@ -136,27 +182,23 @@ class DecisionService:
         logger.info(
             f"[DecisionService] Saved decision for {comp_name} ({canonical_id}) under profile '{req.profile_name}' for {target_owner}: {req.decision.upper()}"
         )
-
-        return DecisionResponse(
-            decision_id=dec_record.decision_id,
-            canonical_company_id=dec_record.canonical_company_id,
-            company_name=dec_record.company_name,
-            profile_name=dec_record.profile_name,
-            decision=dec_record.decision,
-            decision_reason=dec_record.decision_reason,
-            decision_note=dec_record.decision_note,
-            run_id=dec_record.run_id,
-            decided_by=dec_record.decided_by,
-            owner_email=dec_record.owner_email,
-            updated_at=dec_record.updated_at,
-        )
+        return self._to_response(dec_record)
 
     def bulk_sync_decisions(
-        self, bulk_req: DecisionBulkSyncRequest, owner_email: Optional[str] = None
+        self,
+        bulk_req: DecisionBulkSyncRequest,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> List[DecisionResponse]:
         """Bulk upsert all Keep/Drop decisions when user exports results for a profile."""
         now = datetime.utcnow()
-        target_owner = owner_email or bulk_req.owner_email or "analyst"
+        target_user_id, target_owner = resolve_user_identity(
+            user_id=user_id,
+            owner_email=owner_email or bulk_req.owner_email,
+        )
+        if not target_user_id and not target_owner:
+            raise ValueError("Authenticated user is required to sync decisions.")
+
         records_to_save: List[DecisionRecord] = []
         responses: List[DecisionResponse] = []
 
@@ -168,7 +210,13 @@ class DecisionService:
             prof_name = item.profile_name or bulk_req.profile_name
             r_id = item.run_id or bulk_req.run_id
 
-            dec_id = self._compute_decision_id(canonical_id, prof_name, r_id, owner_email=target_owner)
+            dec_id = self._compute_decision_id(
+                canonical_id,
+                prof_name,
+                r_id,
+                owner_email=target_owner,
+                user_id=target_user_id,
+            )
 
             rec = DecisionRecord(
                 decision_id=dec_id,
@@ -179,27 +227,14 @@ class DecisionService:
                 decision_reason=item.decision_reason,
                 decision_note=item.decision_note,
                 run_id=r_id,
-                decided_by=item.decided_by or "Analyst",
+                decided_by=item.decided_by or target_owner or "User",
                 owner_email=target_owner,
+                user_id=target_user_id,
                 created_at=now,
                 updated_at=now,
             )
             records_to_save.append(rec)
-            responses.append(
-                DecisionResponse(
-                    decision_id=rec.decision_id,
-                    canonical_company_id=rec.canonical_company_id,
-                    company_name=rec.company_name,
-                    profile_name=rec.profile_name,
-                    decision=rec.decision,
-                    decision_reason=rec.decision_reason,
-                    decision_note=rec.decision_note,
-                    run_id=rec.run_id,
-                    decided_by=rec.decided_by,
-                    owner_email=rec.owner_email,
-                    updated_at=rec.updated_at,
-                )
-            )
+            responses.append(self._to_response(rec))
 
         if records_to_save:
             self.repo.save_decisions_batch(records_to_save)
@@ -214,51 +249,33 @@ class DecisionService:
         canonical_company_id: str,
         profile_name: Optional[str] = None,
         owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Optional[DecisionResponse]:
-        """Fetch the most recent decision for a security."""
+        """Fetch the most recent decision for a security owned by caller."""
         canonical_id = self._resolve_canonical_company_id(canonical_company_id)
-        rec = self.repo.get_decision(canonical_id, profile_name=profile_name, owner_email=owner_email)
-        if not rec:
-            return None
-        return DecisionResponse(
-            decision_id=rec.decision_id,
-            canonical_company_id=rec.canonical_company_id,
-            company_name=rec.company_name,
-            profile_name=rec.profile_name,
-            decision=rec.decision,
-            decision_reason=rec.decision_reason,
-            decision_note=rec.decision_note,
-            run_id=rec.run_id,
-            decided_by=rec.decided_by,
-            owner_email=rec.owner_email,
-            updated_at=rec.updated_at,
+        rec = self.repo.get_decision(
+            canonical_id,
+            profile_name=profile_name,
+            owner_email=owner_email,
+            user_id=user_id,
         )
+        return self._to_response(rec) if rec else None
 
     def list_decisions(
         self,
         profile_name: Optional[str] = None,
         run_id: Optional[str] = None,
         owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> List[DecisionResponse]:
-        """Fetch decisions, optionally filtered by profile_name, run_id, or owner_email."""
-        records = self.repo.list_decisions(profile_name=profile_name, run_id=run_id, owner_email=owner_email)
-
-        return [
-            DecisionResponse(
-                decision_id=r.decision_id,
-                canonical_company_id=r.canonical_company_id,
-                company_name=r.company_name,
-                profile_name=r.profile_name,
-                decision=r.decision,
-                decision_reason=r.decision_reason,
-                decision_note=r.decision_note,
-                run_id=r.run_id,
-                decided_by=r.decided_by,
-                owner_email=r.owner_email,
-                updated_at=r.updated_at,
-            )
-            for r in records
-        ]
+        """Fetch decisions owned by caller, optionally filtered by profile_name or run_id."""
+        records = self.repo.list_decisions(
+            profile_name=profile_name,
+            run_id=run_id,
+            owner_email=owner_email,
+            user_id=user_id,
+        )
+        return [self._to_response(r) for r in records]
 
 
 decision_service = DecisionService()

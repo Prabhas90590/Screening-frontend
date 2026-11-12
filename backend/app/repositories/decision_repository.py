@@ -5,6 +5,7 @@ import logging
 from typing import Any, List, Optional
 
 from app.db.connection import db_manager
+from app.db.ownership import build_owner_filter
 from app.models.decision import DecisionRecord, HoldingRecord
 
 logger = logging.getLogger("app.repositories.decision")
@@ -22,55 +23,12 @@ class DecisionRepository:
 
     DECISION_SELECT_COLS = (
         "decision_id, canonical_company_id, company_name, profile_name, decision, "
-        "decision_reason, decision_note, run_id, decided_by, owner_email, created_at, updated_at"
+        "decision_reason, decision_note, run_id, decided_by, owner_email, user_id, created_at, updated_at"
     )
 
     def save_decision(self, decision: DecisionRecord) -> str:
         """Insert or update a Keep/Drop analyst decision with company_name and profile_name."""
-        conn = db_manager.get_connection()
-
-        insert_sql = """
-            INSERT INTO decisions (
-                decision_id, canonical_company_id, company_name, profile_name, decision,
-                decision_reason, decision_note, run_id, decided_by, owner_email, created_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (decision_id) DO UPDATE SET
-                company_name = COALESCE(EXCLUDED.company_name, decisions.company_name),
-                profile_name = COALESCE(EXCLUDED.profile_name, decisions.profile_name),
-                decision = EXCLUDED.decision,
-                decision_reason = EXCLUDED.decision_reason,
-                decision_note = EXCLUDED.decision_note,
-                run_id = COALESCE(EXCLUDED.run_id, decisions.run_id),
-                owner_email = COALESCE(EXCLUDED.owner_email, decisions.owner_email),
-                updated_at = EXCLUDED.updated_at;
-        """
-
-        values = (
-            decision.decision_id,
-            decision.canonical_company_id,
-            decision.company_name,
-            decision.profile_name,
-            decision.decision,
-            decision.decision_reason,
-            decision.decision_note,
-            decision.run_id,
-            decision.decided_by,
-            decision.owner_email,
-            decision.created_at,
-            decision.updated_at,
-        )
-
-        try:
-            cursor = conn.cursor()
-            cursor.execute(insert_sql, values)
-            conn.commit()
-            return decision.decision_id
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"Failed to save decision for company '{decision.canonical_company_id}': {e}")
-            raise
-        finally:
-            conn.close()
+        return self.save_decisions_batch([decision]) and decision.decision_id
 
     def save_decisions_batch(self, decisions: List[DecisionRecord]) -> int:
         """Bulk insert or update a list of analyst decisions in a single transaction."""
@@ -81,8 +39,8 @@ class DecisionRepository:
         insert_sql = """
             INSERT INTO decisions (
                 decision_id, canonical_company_id, company_name, profile_name, decision,
-                decision_reason, decision_note, run_id, decided_by, owner_email, created_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                decision_reason, decision_note, run_id, decided_by, owner_email, user_id, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (decision_id) DO UPDATE SET
                 company_name = COALESCE(EXCLUDED.company_name, decisions.company_name),
                 profile_name = COALESCE(EXCLUDED.profile_name, decisions.profile_name),
@@ -91,6 +49,7 @@ class DecisionRepository:
                 decision_note = EXCLUDED.decision_note,
                 run_id = COALESCE(EXCLUDED.run_id, decisions.run_id),
                 owner_email = COALESCE(EXCLUDED.owner_email, decisions.owner_email),
+                user_id = COALESCE(EXCLUDED.user_id, decisions.user_id),
                 updated_at = EXCLUDED.updated_at;
         """
 
@@ -108,6 +67,7 @@ class DecisionRepository:
                     d.run_id,
                     d.decided_by,
                     d.owner_email,
+                    d.user_id,
                     d.created_at,
                     d.updated_at,
                 )
@@ -126,18 +86,20 @@ class DecisionRepository:
         canonical_company_id: str,
         profile_name: Optional[str] = None,
         owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Optional[DecisionRecord]:
-        """Fetch latest decision for a company, optionally matching profile_name and owner_email."""
+        """Fetch latest decision for a company owned by caller."""
+        if not owner_email and not user_id:
+            return None
+
         conn = db_manager.get_connection()
 
-        conditions = ["canonical_company_id = %s"]
-        params: list = [canonical_company_id]
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
+        conditions = ["canonical_company_id = %s", owner_clause]
+        params: list = [canonical_company_id, *owner_params]
         if profile_name:
             conditions.append("profile_name = %s")
             params.append(profile_name)
-        if owner_email:
-            conditions.append("LOWER(owner_email) = LOWER(%s)")
-            params.append(owner_email)
 
         query = f"SELECT {self.DECISION_SELECT_COLS} FROM decisions WHERE {' AND '.join(conditions)} ORDER BY updated_at DESC LIMIT 1"
 
@@ -156,28 +118,29 @@ class DecisionRepository:
         profile_name: Optional[str] = None,
         run_id: Optional[str] = None,
         owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> List[DecisionRecord]:
-        """Retrieve recorded analyst decisions, optionally filtered by profile_name, run_id, or owner_email."""
+        """Retrieve recorded analyst decisions strictly scoped to caller."""
+        if not owner_email and not user_id:
+            return []
+
         conn = db_manager.get_connection()
 
-        conditions = []
-        params: list = []
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
+        conditions = [owner_clause]
+        params: list = [*owner_params]
         if profile_name:
             conditions.append("profile_name = %s")
             params.append(profile_name)
         if run_id:
             conditions.append("run_id = %s")
             params.append(run_id)
-        if owner_email:
-            conditions.append("LOWER(owner_email) = LOWER(%s)")
-            params.append(owner_email)
 
-        where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        query = f"SELECT {self.DECISION_SELECT_COLS} FROM decisions{where_clause} ORDER BY updated_at DESC"
+        query = f"SELECT {self.DECISION_SELECT_COLS} FROM decisions WHERE {' AND '.join(conditions)} ORDER BY updated_at DESC"
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query, tuple(params) if params else ())
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
             return [self._row_to_decision(row) for row in rows]
         finally:
@@ -260,8 +223,9 @@ class DecisionRepository:
                 run_id=row[7],
                 decided_by=row[8] or "Analyst",
                 owner_email=row[9],
-                created_at=row[10] if isinstance(row[10], datetime) else datetime.fromisoformat(str(row[10])),
-                updated_at=row[11] if isinstance(row[11], datetime) else datetime.fromisoformat(str(row[11])),
+                user_id=row[10],
+                created_at=row[11] if isinstance(row[11], datetime) else datetime.fromisoformat(str(row[11])),
+                updated_at=row[12] if isinstance(row[12], datetime) else datetime.fromisoformat(str(row[12])),
             )
         else:
             return DecisionRecord(
@@ -275,6 +239,7 @@ class DecisionRepository:
                 run_id=row.get("run_id"),
                 decided_by=row.get("decided_by") or "Analyst",
                 owner_email=row.get("owner_email"),
+                user_id=row.get("user_id"),
                 created_at=row["created_at"] if isinstance(row["created_at"], datetime) else datetime.fromisoformat(str(row["created_at"])),
                 updated_at=row["updated_at"] if isinstance(row["updated_at"], datetime) else datetime.fromisoformat(str(row["updated_at"])),
             )

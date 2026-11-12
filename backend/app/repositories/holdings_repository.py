@@ -6,9 +6,15 @@ from typing import Any, List, Optional
 import psycopg2.extras
 
 from app.db.connection import db_manager
+from app.db.ownership import build_owner_filter
 from app.models.holding import HoldingRecord, HoldingWithDetails
 
 logger = logging.getLogger("app.repositories.holdings")
+
+_HOLDING_SELECT_COLS = (
+    "holding_id, canonical_company_id, portfolio_name, shares, cost_basis, "
+    "weight_pct, holding_rank, owner_email, user_id, created_at"
+)
 
 
 class HoldingsRepository:
@@ -24,13 +30,15 @@ class HoldingsRepository:
         insert_sql = """
             INSERT INTO holdings (
                 holding_id, canonical_company_id, portfolio_name,
-                shares, cost_basis, weight_pct, holding_rank, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                shares, cost_basis, weight_pct, holding_rank, owner_email, user_id, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (holding_id) DO UPDATE SET
                 shares = EXCLUDED.shares,
                 cost_basis = EXCLUDED.cost_basis,
                 weight_pct = EXCLUDED.weight_pct,
-                holding_rank = EXCLUDED.holding_rank;
+                holding_rank = EXCLUDED.holding_rank,
+                owner_email = COALESCE(EXCLUDED.owner_email, holdings.owner_email),
+                user_id = COALESCE(EXCLUDED.user_id, holdings.user_id);
         """
 
         values = (
@@ -41,6 +49,8 @@ class HoldingsRepository:
             holding.cost_basis,
             holding.weight_pct,
             holding.holding_rank,
+            holding.owner_email,
+            holding.user_id,
             holding.created_at,
         )
 
@@ -67,13 +77,15 @@ class HoldingsRepository:
         sql = """
             INSERT INTO holdings (
                 holding_id, canonical_company_id, portfolio_name,
-                shares, cost_basis, weight_pct, holding_rank, created_at
+                shares, cost_basis, weight_pct, holding_rank, owner_email, user_id, created_at
             ) VALUES %s
             ON CONFLICT (holding_id) DO UPDATE SET
                 shares = EXCLUDED.shares,
                 cost_basis = EXCLUDED.cost_basis,
                 weight_pct = EXCLUDED.weight_pct,
-                holding_rank = EXCLUDED.holding_rank;
+                holding_rank = EXCLUDED.holding_rank,
+                owner_email = COALESCE(EXCLUDED.owner_email, holdings.owner_email),
+                user_id = COALESCE(EXCLUDED.user_id, holdings.user_id);
         """
         values_list = [
             (
@@ -84,6 +96,8 @@ class HoldingsRepository:
                 h.cost_basis,
                 h.weight_pct,
                 h.holding_rank,
+                h.owner_email,
+                h.user_id,
                 h.created_at,
             )
             for h in deduped
@@ -100,28 +114,53 @@ class HoldingsRepository:
         finally:
             conn.close()
 
-    def list_holdings(self, portfolio_name: Optional[str] = None) -> List[HoldingRecord]:
-        """List active fund holdings."""
+    def list_holdings(
+        self,
+        portfolio_name: Optional[str] = None,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[HoldingRecord]:
+        """List active fund holdings strictly scoped to caller."""
+        if not owner_email and not user_id:
+            return []
+
         conn = db_manager.get_connection()
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
+        conditions = [owner_clause]
+        params: list = [*owner_params]
 
         if portfolio_name:
-            query = "SELECT * FROM holdings WHERE portfolio_name = %s ORDER BY COALESCE(holding_rank, 999999) ASC, weight_pct DESC"
-            params = (portfolio_name,)
-        else:
-            query = "SELECT * FROM holdings ORDER BY COALESCE(holding_rank, 999999) ASC, weight_pct DESC"
-            params = ()
+            conditions.append("portfolio_name = %s")
+            params.append(portfolio_name)
+
+        query = (
+            f"SELECT {_HOLDING_SELECT_COLS} FROM holdings "
+            f"WHERE {' AND '.join(conditions)} "
+            "ORDER BY COALESCE(holding_rank, 999999) ASC, weight_pct DESC"
+        )
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
             return [self._row_to_holding(row) for row in rows]
         finally:
             conn.close()
 
-    def get_holdings_with_details(self, portfolio_name: Optional[str] = None) -> List[HoldingWithDetails]:
-        """Fetch holdings joined with Security Master company details."""
+    def get_holdings_with_details(
+        self,
+        portfolio_name: Optional[str] = None,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[HoldingWithDetails]:
+        """Fetch holdings joined with Security Master company details scoped to caller."""
+        if not owner_email and not user_id:
+            return []
+
         conn = db_manager.get_connection()
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email, alias="h")
+        conditions = [owner_clause]
+        params: list = [*owner_params]
 
         query = """
             SELECT 
@@ -139,20 +178,20 @@ class HoldingsRepository:
                 COALESCE(c.sector, 'Unclassified') AS sector,
                 c.market_cap_display,
                 c.market_cap,
-                h.holding_rank
+                h.holding_rank,
+                h.owner_email,
+                h.user_id
             FROM holdings h
             LEFT JOIN companies c ON h.canonical_company_id = c.canonical_id
         """
         if portfolio_name:
-            query += " WHERE h.portfolio_name = %s ORDER BY COALESCE(h.holding_rank, 999999) ASC, h.weight_pct DESC"
-            params = (portfolio_name,)
-        else:
-            query += " ORDER BY COALESCE(h.holding_rank, 999999) ASC, h.weight_pct DESC"
-            params = ()
+            conditions.append("h.portfolio_name = %s")
+            params.append(portfolio_name)
+        query += f" WHERE {' AND '.join(conditions)} ORDER BY COALESCE(h.holding_rank, 999999) ASC, h.weight_pct DESC"
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
             results: List[HoldingWithDetails] = []
             for row in rows:
@@ -172,39 +211,60 @@ class HoldingsRepository:
                         sector=row[11],
                         market_cap_display=float(row[12]) if row[12] is not None else None,
                         holding_rank=int(row[14]) if (len(row) > 14 and row[14] is not None) else None,
+                        owner_email=row[15] if len(row) > 15 else None,
+                        user_id=row[16] if len(row) > 16 else None,
                     )
                 )
             return results
         finally:
             conn.close()
 
-    def delete_holding(self, holding_id: str) -> bool:
-        """Delete a single holding by ID."""
+    def delete_holding(
+        self,
+        holding_id: str,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        """Delete a single holding by ID owned by caller."""
+        if not owner_email and not user_id:
+            return False
+
         conn = db_manager.get_connection()
-        query = "DELETE FROM holdings WHERE holding_id = %s"
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
+        query = f"DELETE FROM holdings WHERE holding_id = %s AND {owner_clause}"
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query, (holding_id,))
+            cursor.execute(query, (holding_id, *owner_params))
             conn.commit()
             return cursor.rowcount > 0
         finally:
             conn.close()
 
-    def clear_holdings(self, portfolio_name: Optional[str] = None) -> int:
-        """Delete all holdings for a given portfolio (or entire table)."""
+    def clear_holdings(
+        self,
+        portfolio_name: Optional[str] = None,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> int:
+        """Delete holdings owned by caller (optionally limited to a named portfolio)."""
+        if not owner_email and not user_id:
+            return 0
+
         conn = db_manager.get_connection()
+        owner_clause, owner_params = build_owner_filter(user_id=user_id, owner_email=owner_email)
+        conditions = [owner_clause]
+        params: list = [*owner_params]
 
         if portfolio_name:
-            query = "DELETE FROM holdings WHERE portfolio_name = %s"
-            params = (portfolio_name,)
-        else:
-            query = "DELETE FROM holdings"
-            params = ()
+            conditions.append("portfolio_name = %s")
+            params.append(portfolio_name)
+
+        query = f"DELETE FROM holdings WHERE {' AND '.join(conditions)}"
 
         try:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             deleted = cursor.rowcount
             conn.commit()
             return deleted
@@ -219,8 +279,10 @@ class HoldingsRepository:
             shares=float(row[3] or 0.0),
             cost_basis=float(row[4] or 0.0),
             weight_pct=float(row[5] or 0.0),
-            holding_rank=int(row[6]) if (len(row) > 7 and row[6] is not None) else None,
-            created_at=row[7] if (len(row) > 7 and isinstance(row[7], datetime)) else (row[6] if isinstance(row[6], datetime) else datetime.utcnow()),
+            holding_rank=int(row[6]) if row[6] is not None else None,
+            owner_email=row[7],
+            user_id=row[8],
+            created_at=row[9] if isinstance(row[9], datetime) else datetime.fromisoformat(str(row[9])),
         )
 
 

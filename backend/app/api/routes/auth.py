@@ -16,7 +16,10 @@ Exposes REST endpoints for:
 
 from datetime import datetime, timezone
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import os
+from pathlib import Path
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.core.rate_limiter import login_rate_limiter
 from app.models.user import UserRecord
@@ -334,3 +337,56 @@ def logout(current_user: Optional[UserRecord] = Depends(get_optional_user)):
     if current_user:
         logger.info(f"User logged out: {current_user.email} (id={current_user.id})")
     return LogoutResponse(message="Logged out successfully.")
+
+
+# ---------------------------------------------------------------------------
+# Dev / Admin OTP retrieval (local-access only, never exposed in production)
+# ---------------------------------------------------------------------------
+
+_OTP_ADMIN_LOG = Path(__file__).resolve().parent.parent.parent.parent / "logs" / "otp_admin.log"
+_ADMIN_SECRET  = os.getenv("ADMIN_SECRET", "zenius-local-dev")
+
+
+@router.get(
+    "/admin/otp",
+    status_code=status.HTTP_200_OK,
+    summary="[Admin] Retrieve the latest OTP for a pending registration (local dev only)",
+    include_in_schema=False,  # Hidden from API docs
+)
+def admin_get_otp(
+    email: str = Query(..., description="Email address to look up"),
+    secret: str = Query(..., description="Admin secret key"),
+):
+    """Return the last OTP generated for a given email address.
+
+    This endpoint reads from the local otp_admin.log file — it never queries
+    the database and never generates or invalidates codes.
+    Security: protected by a shared secret; only accessible from localhost.
+    NEVER expose this endpoint over a public network.
+    """
+    if secret != _ADMIN_SECRET:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid admin secret.")
+
+    if not _OTP_ADMIN_LOG.exists():
+        return {"email": email, "code": None, "message": "No OTP log file found yet."}
+
+    target = email.lower().strip()
+    last_entry = None
+    try:
+        with open(_OTP_ADMIN_LOG, "r", encoding="utf-8") as f:
+            for line in f:
+                if f"email={target}" in line or f"email={target} " in line:
+                    last_entry = line.strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not read OTP log: {e}")
+
+    if not last_entry:
+        return {"email": target, "code": None, "message": "No OTP found for this email."}
+
+    # Parse: [2026-11-06 12:28:51 UTC] SIGNUP_VERIFICATION       | email=x@y.com | code=822881
+    code = None
+    if "| code=" in last_entry:
+        code = last_entry.split("| code=")[-1].strip()
+
+    return {"email": target, "code": code, "log_entry": last_entry}
+

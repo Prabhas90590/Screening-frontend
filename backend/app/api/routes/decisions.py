@@ -31,7 +31,11 @@ def record_analyst_decision(
         )
     user_email = current_user.email
     try:
-        return decision_service.record_decision(request, owner_email=user_email)
+        return decision_service.record_decision(
+            request,
+            owner_email=user_email,
+            user_id=current_user.id,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -52,7 +56,11 @@ def bulk_sync_analyst_decisions(
         )
     user_email = current_user.email
     try:
-        return decision_service.bulk_sync_decisions(request, owner_email=user_email)
+        return decision_service.bulk_sync_decisions(
+            request,
+            owner_email=user_email,
+            user_id=current_user.id,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -71,7 +79,12 @@ def list_analyst_decisions(
         return []
     user_email = current_user.email
     try:
-        return decision_service.list_decisions(profile_name=profile_name, run_id=run_id, owner_email=user_email)
+        return decision_service.list_decisions(
+            profile_name=profile_name,
+            run_id=run_id,
+            owner_email=user_email,
+            user_id=current_user.id,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -92,7 +105,12 @@ def get_analyst_decision(
             detail=f"No analyst decision recorded for company '{canonical_company_id}'.",
         )
     user_email = current_user.email
-    decision = decision_service.get_decision(canonical_company_id, profile_name=profile_name, owner_email=user_email)
+    decision = decision_service.get_decision(
+        canonical_company_id,
+        profile_name=profile_name,
+        owner_email=user_email,
+        user_id=current_user.id,
+    )
     if not decision:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

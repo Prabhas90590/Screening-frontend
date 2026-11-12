@@ -396,8 +396,18 @@ export const ScreeningProvider = ({ children }) => {
 
   // Phase 17: Load persistent schedule config and upcoming runs from backend
   useEffect(() => {
+    setScheduleConfig(INITIAL_SCHEDULE);
+    setAllSchedules([]);
+    setNextRuns([]);
+    setNextRunsDetailed([]);
+    setNextRunsByFrequency({});
+
+    if (!user || userEmail === 'guest') return;
+
+    let isMounted = true;
     fetchScheduleConfig()
       .then((res) => {
+        if (!isMounted) return;
         if (res) {
           if (res.schedules && Array.isArray(res.schedules)) {
             setAllSchedules(res.schedules);
@@ -416,7 +426,7 @@ export const ScreeningProvider = ({ children }) => {
             setScheduleConfig((prev) => ({
               ...prev,
               scheduleId: s.schedule_id || prev.scheduleId,
-              profile: s.profile_name || prev.profile,
+              profile: (s.profile_name && s.profile_name !== 'None' ? s.profile_name : '') || prev.profile,
               selectedProfileId: s.profile_id || prev.selectedProfileId,
               frequency: s.frequency || prev.frequency,
               dailyType: s.daily_type || prev.dailyType || 'trading_days',
@@ -437,7 +447,11 @@ export const ScreeningProvider = ({ children }) => {
       .catch((err) => {
         console.warn('[ScreeningContext] Could not load schedule from backend:', err.message);
       });
-  }, []);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [userEmail, user?.id]);
 
   const saveScheduleToBackend = async (updates = {}, forceNew = false) => {
     const isNew = forceNew || !scheduleConfig.scheduleId;
@@ -459,10 +473,14 @@ export const ScreeningProvider = ({ children }) => {
       }
     }
 
+    const cleanProfileName =
+      merged.profile && !['none', 'null'].includes(String(merged.profile).trim().toLowerCase())
+        ? merged.profile
+        : '';
     const payload = {
       schedule_id: schedId,
       profile_id: merged.selectedProfileId || undefined,
-      profile_name: merged.profile || 'Default Strategy',
+      profile_name: cleanProfileName || 'Default Strategy',
       frequency: merged.frequency || 'Daily',
       daily_type: merged.dailyType || 'trading_days',
       active_days: actDays || ['mon', 'tue', 'wed', 'thu', 'fri'],
@@ -557,8 +575,8 @@ export const ScreeningProvider = ({ children }) => {
           if (target) {
             setScheduleConfig({
               scheduleId: target.schedule_id,
-              profile: target.profile_name,
-              selectedProfileId: target.profile_id,
+              profile: target.profile_name && target.profile_name !== 'None' ? target.profile_name : '',
+              selectedProfileId: target.profile_id || '',
               frequency: target.frequency,
               dailyType: target.daily_type || 'trading_days',
               activeDays: target.active_days || ['mon', 'tue', 'wed', 'thu', 'fri'],
@@ -876,6 +894,19 @@ export const ScreeningProvider = ({ children }) => {
   useEffect(() => {
     let isMounted = true;
 
+    setProfiles([]);
+    setVersionHistory([]);
+    setRunHistory([]);
+    setSelectedRunId(null);
+    setSecurities([]);
+    setSelectedProfileName('No active profile');
+
+    if (!user || userEmail === 'guest') {
+      return () => {
+        isMounted = false;
+      };
+    }
+
     async function loadBackendProfiles() {
       try {
         // Step 1: Read whatever is currently in user-scoped local storage
@@ -963,7 +994,7 @@ export const ScreeningProvider = ({ children }) => {
     return () => {
       isMounted = false;
     };
-  }, [userEmail]);
+  }, [userEmail, user?.id]);
 
   useEffect(() => {
     if (filterSector !== 'All' && !selectedSectorNames.includes(filterSector)) {
@@ -1066,7 +1097,14 @@ export const ScreeningProvider = ({ children }) => {
             rule_version_id: r.rule_version_id,
             screened: r.status === 'running' ? 'Evaluating...' : (r.universe_count || 0),
             selected: r.status === 'running' ? '—' : (r.selected_count || 0),
-            status: r.status === 'succeeded' ? 'Succeeded' : (r.status === 'running' ? 'Running' : 'Failed'),
+            status: r.status === 'succeeded'
+              ? 'Succeeded'
+              : r.status === 'running'
+                ? 'Running'
+                : r.status === 'blocked'
+                  ? 'Blocked'
+                  : 'Failed',
+            error_message: r.error_message || null,
             duration: durationStr,
             duration_ms: r.duration_ms,
             notification_email: r.notification_email || null,
@@ -1153,12 +1191,22 @@ export const ScreeningProvider = ({ children }) => {
       const response = await initiateScreening(payload);
 
       if (response && response.run_id) {
-        setScreeningRunSuccess({
-          runId: response.run_id,
-          durationMs: response.duration_ms,
-          screenedCount: response.funnel?.universe || 0,
-          selectedCount: response.funnel?.selected || 0,
-        });
+        const isHalted = response.status === 'blocked' || response.status === 'failed';
+        if (isHalted) {
+          const haltMessage =
+            response.errors?.[0] ||
+            response.warnings?.[0] ||
+            'Screening run was blocked by pre-flight data guardrails.';
+          setScreeningError(haltMessage);
+          setScreeningRunSuccess(null);
+        } else {
+          setScreeningRunSuccess({
+            runId: response.run_id,
+            durationMs: response.duration_ms,
+            screenedCount: response.funnel?.universe || 0,
+            selectedCount: response.funnel?.selected || 0,
+          });
+        }
 
         // Update funnel counts in UI
         if (response.funnel) {
@@ -1175,7 +1223,7 @@ export const ScreeningProvider = ({ children }) => {
             },
             runInfo: {
               ...prev.runInfo,
-              asOfDate: `Run ${response.run_id} completed`,
+              asOfDate: `Run ${response.run_id} ${response.status === 'blocked' ? 'blocked' : response.status === 'failed' ? 'failed' : 'completed'}`,
             },
           }));
         }
@@ -1501,18 +1549,25 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
       rules: activeRulesForBackend,
     };
 
-    let backendVersionId = `${nextProfileKey}-${version}`;
+    let createdBackend = null;
     try {
-      const createdBackend = await createProfileApi(backendPayload);
-      if (createdBackend?.version_id) {
-        backendVersionId = createdBackend.version_id;
-      }
+      createdBackend = await createProfileApi(backendPayload);
     } catch (err) {
-      console.warn('[ScreeningContext] Could not persist profile to backend, using local store:', err);
+      console.error('[ScreeningContext] Could not persist profile to backend:', err);
+      return {
+        saved: false,
+        error: err?.message || 'Could not persist profile to backend.',
+      };
     }
+
+    const backendVersionId = createdBackend?.version_id || `${nextProfileKey}-${version}`;
+    const resolvedOwnerEmail = createdBackend?.owner_email || user?.email || null;
+    const resolvedUserId = createdBackend?.user_id || user?.id || null;
 
     const newHistoryItem = {
       id: backendVersionId,
+      owner_email: resolvedOwnerEmail,
+      user_id: resolvedUserId,
       profileKey: nextProfileKey,
       versionNumber: nextVersionNumber,
       version,
@@ -1534,6 +1589,8 @@ const loadConfiguration = (snapshot, navigateToCatalog = true) => {
 
     const newProfileItem = {
       id: backendVersionId,
+      owner_email: resolvedOwnerEmail,
+      user_id: resolvedUserId,
       profileKey: nextProfileKey,
       name: trimmedName,
       badge: 'Active',

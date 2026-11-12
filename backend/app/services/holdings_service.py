@@ -5,12 +5,14 @@ and persistent bulk storage of fund holdings in PostgreSQL.
 """
 
 import csv
+import hashlib
 import io
 import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 import openpyxl
 
+from app.db.ownership import resolve_user_identity
 from app.models.holding import HoldingRecord, HoldingWithDetails
 from app.repositories.company_repository import company_repository
 from app.repositories.holdings_repository import holdings_repository
@@ -192,11 +194,35 @@ class HoldingsService:
         except (ValueError, TypeError):
             return default
 
+    @staticmethod
+    def _build_holding_id(
+        canonical_company_id: str,
+        portfolio_name: str,
+        user_id: Optional[str],
+        owner_email: Optional[str],
+    ) -> str:
+        """Build a user-scoped holding primary key within the 64-char DB limit."""
+        port_slug = re.sub(r"[^a-zA-Z0-9]", "-", portfolio_name.lower()).strip("-") or "portfolio"
+        if user_id and user_id.strip():
+            owner_key = re.sub(r"[^a-zA-Z0-9]", "", user_id.strip())[:8].lower()
+        elif owner_email and owner_email.strip():
+            owner_key = re.sub(r"[^a-zA-Z0-9]", "-", owner_email.split("@")[0].lower()).strip("-")[:10]
+        else:
+            raise ValueError("Authenticated user identity is required to manage holdings.")
+
+        raw = f"hld-{owner_key}-{canonical_company_id}-{port_slug}"
+        if len(raw) <= 64:
+            return raw
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+        return f"hld-{owner_key}-{digest}-{canonical_company_id}"[:64]
+
     def import_holdings_file(
         self,
         file_bytes: bytes,
         filename: str,
         portfolio_name: str = "Core Equity Fund",
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> HoldingsImportResponse:
         """Parse, reconcile, and persist portfolio holdings from uploaded file."""
         raw_rows = self.parse_file_rows(file_bytes, filename)
@@ -259,10 +285,12 @@ class HoldingsService:
                 message="Could not locate a Ticker or Symbol column in spreadsheet headers.",
             )
 
+        target_user_id, target_owner = resolve_user_identity(user_id=user_id, owner_email=owner_email)
+        if not target_user_id and not target_owner:
+            raise ValueError("Authentication required to import portfolio holdings.")
+
         matched_records: List[HoldingRecord] = []
         unmatched_rows: List[UnmatchedHoldingRow] = []
-
-        port_slug = re.sub(r"[^a-zA-Z0-9]", "-", portfolio_name.lower()).strip("-")
 
         for idx, row in enumerate(raw_rows):
             raw_id = str(row.get(ticker_col, "")).strip().strip("'\"")
@@ -310,7 +338,9 @@ class HoldingsService:
             else:
                 holding_rank = idx + 1
 
-            holding_id = f"hld-{company.canonical_id}-{port_slug}"
+            holding_id = self._build_holding_id(
+                company.canonical_id, portfolio_name, target_user_id, target_owner
+            )
             matched_records.append(
                 HoldingRecord(
                     holding_id=holding_id,
@@ -320,16 +350,20 @@ class HoldingsService:
                     cost_basis=cost_basis,
                     weight_pct=weight,
                     holding_rank=holding_rank,
+                    owner_email=target_owner,
+                    user_id=target_user_id,
                 )
             )
 
-        # Clear previous holdings and bulk save matched holdings into PostgreSQL
+        # Clear caller's previous holdings for this portfolio and bulk save matched holdings
         if matched_records:
-            self.repo.clear_holdings(portfolio_name)
+            self.repo.clear_holdings(portfolio_name, owner_email=target_owner, user_id=target_user_id)
             self.repo.save_holdings_batch(matched_records)
 
         # Retrieve saved holdings with enriched company details
-        detailed = self.repo.get_holdings_with_details(portfolio_name)
+        detailed = self.repo.get_holdings_with_details(
+            portfolio_name, owner_email=target_owner, user_id=target_user_id
+        )
         schema_items = [self._to_schema_item(d) for d in detailed]
 
         msg = (
@@ -490,27 +524,42 @@ class HoldingsService:
         company_repository.save_listing(listing_rec)
         return record
 
-    def add_manual_holding(self, request: CreateHoldingRequest) -> HoldingItemSchema:
-        """Manually add or update a single holding in the portfolio."""
+    def add_manual_holding(
+        self,
+        request: CreateHoldingRequest,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> HoldingItemSchema:
+        """Manually add or update a single holding in the portfolio for caller."""
+        target_user_id, target_owner = resolve_user_identity(user_id=user_id, owner_email=owner_email)
+        if not target_user_id and not target_owner:
+            raise ValueError("Authentication required to add holdings.")
+
         company = self._reconcile_identifier(request.ticker)
         if not company:
             raise ValueError(f"Ticker '{request.ticker}' could not be resolved in the Security Master.")
 
-        port_slug = re.sub(r"[^a-zA-Z0-9]", "-", request.portfolio_name.lower()).strip("-")
-        holding_id = f"hld-{company.canonical_id}-{port_slug}"
+        port_name = request.portfolio_name or "Core Equity Fund"
+        holding_id = self._build_holding_id(
+            company.canonical_id, port_name, target_user_id, target_owner
+        )
 
         record = HoldingRecord(
             holding_id=holding_id,
             canonical_company_id=company.canonical_id,
-            portfolio_name=request.portfolio_name,
+            portfolio_name=port_name,
             shares=request.shares or 0.0,
             cost_basis=request.cost_basis or 0.0,
             weight_pct=request.weight_pct or 0.0,
             holding_rank=request.holding_rank,
+            owner_email=target_owner,
+            user_id=target_user_id,
         )
         self.repo.save_holding(record)
 
-        detailed = self.repo.get_holdings_with_details(request.portfolio_name)
+        detailed = self.repo.get_holdings_with_details(
+            port_name, owner_email=target_owner, user_id=target_user_id
+        )
         match = next((d for d in detailed if d.holding_id == holding_id), None)
         if match:
             return self._to_schema_item(match)
@@ -531,14 +580,28 @@ class HoldingsService:
             created_at=record.created_at,
         )
 
-    def list_holdings(self, portfolio_name: Optional[str] = None) -> List[HoldingItemSchema]:
-        """List active holdings enriched with Security Master details."""
-        detailed = self.repo.get_holdings_with_details(portfolio_name)
+    def list_holdings(
+        self,
+        portfolio_name: Optional[str] = None,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[HoldingItemSchema]:
+        """List active holdings owned by caller enriched with Security Master details."""
+        detailed = self.repo.get_holdings_with_details(
+            portfolio_name, owner_email=owner_email, user_id=user_id
+        )
         return [self._to_schema_item(d) for d in detailed]
 
-    def get_summary(self, portfolio_name: str = "Core Equity Fund") -> HoldingsSummary:
-        """Calculate high-level diversification and allocation summary of holdings."""
-        detailed = self.repo.get_holdings_with_details(portfolio_name)
+    def get_summary(
+        self,
+        portfolio_name: str = "Core Equity Fund",
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> HoldingsSummary:
+        """Calculate high-level diversification and allocation summary of holdings for caller."""
+        detailed = self.repo.get_holdings_with_details(
+            portfolio_name, owner_email=owner_email, user_id=user_id
+        )
         schema_items = [self._to_schema_item(d) for d in detailed]
         total_weight = sum(item.weight_pct for item in schema_items)
         sectors = sorted(list({item.sector for item in schema_items if item.sector}))
@@ -553,13 +616,23 @@ class HoldingsService:
             holdings=schema_items,
         )
 
-    def delete_holding(self, holding_id: str) -> bool:
-        """Delete single holding."""
-        return self.repo.delete_holding(holding_id)
+    def delete_holding(
+        self,
+        holding_id: str,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        """Delete single holding owned by caller."""
+        return self.repo.delete_holding(holding_id, owner_email=owner_email, user_id=user_id)
 
-    def clear_holdings(self, portfolio_name: Optional[str] = None) -> int:
-        """Clear all holdings for a portfolio."""
-        return self.repo.clear_holdings(portfolio_name)
+    def clear_holdings(
+        self,
+        portfolio_name: Optional[str] = None,
+        owner_email: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> int:
+        """Clear all holdings owned by caller (optionally limited to a named portfolio)."""
+        return self.repo.clear_holdings(portfolio_name, owner_email=owner_email, user_id=user_id)
 
     def _to_schema_item(self, d: HoldingWithDetails) -> HoldingItemSchema:
         return HoldingItemSchema(

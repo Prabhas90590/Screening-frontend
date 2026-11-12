@@ -108,6 +108,13 @@ def authenticate_user(email: str, password: str) -> AuthResult:
             detail="Corporate email is not verified yet. Please enter the 6-digit verification code sent to your inbox.",
         )
 
+    try:
+        from app.db.ownership import reconcile_user_ownership
+
+        reconcile_user_ownership(user.id, user.email)
+    except Exception as rec_err:
+        logger.warning(f"Non-fatal ownership reconciliation notice on login for '{clean_email}': {rec_err}")
+
     token = create_access_token(
         user_id=user.id,
         email=user.email,
@@ -234,6 +241,13 @@ def verify_user_email(email: str, code: str) -> AuthResult:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not finalize account creation. Please try again.",
         )
+
+    try:
+        from app.db.ownership import reconcile_user_ownership
+
+        reconcile_user_ownership(user.id, user.email)
+    except Exception as rec_err:
+        logger.warning(f"Non-fatal ownership reconciliation notice on verify for '{clean_email}': {rec_err}")
 
     token = create_access_token(
         user_id=user.id,

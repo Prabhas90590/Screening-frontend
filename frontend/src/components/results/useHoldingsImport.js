@@ -1,8 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { fetchHoldings, uploadHoldingsFile as apiUploadHoldings, clearHoldings as apiClearHoldings } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 
 export const useHoldingsImport = (securities = []) => {
+  const auth = useAuth ? useAuth() : null;
+  const user = auth?.user || null;
+  const userId = user?.id || null;
+  const userEmail = user?.email ? user.email.toLowerCase().trim() : null;
+
   const [persistentHoldings, setPersistentHoldings] = useState([]);
   const [holdingIds, setHoldingIds] = useState([]);
   const [holdingsUploadError, setHoldingsUploadError] = useState('');
@@ -10,8 +16,18 @@ export const useHoldingsImport = (securities = []) => {
   const [uploadedHoldingRows, setUploadedHoldingRows] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Load persistent holdings from PostgreSQL on initial mount
+  // Load persistent holdings from PostgreSQL on initial mount and auth user changes
   const loadPersistentHoldings = useCallback(async () => {
+    setPersistentHoldings([]);
+    setHoldingIds([]);
+    setUploadedHoldingRows([]);
+    setHoldingsUploadSummary('');
+    setHoldingsUploadError('');
+
+    if (!userId && !userEmail) {
+      return;
+    }
+
     try {
       const serverHoldings = await fetchHoldings();
       if (serverHoldings && Array.isArray(serverHoldings)) {
@@ -28,7 +44,7 @@ export const useHoldingsImport = (securities = []) => {
     } catch (err) {
       console.warn('[useHoldingsImport] Could not load holdings from backend:', err);
     }
-  }, []);
+  }, [userId, userEmail]);
 
   // Clear holdings from database and UI state
   const clearPortfolioHoldings = async () => {

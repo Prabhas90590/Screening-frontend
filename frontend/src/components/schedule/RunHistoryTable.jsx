@@ -162,7 +162,7 @@ export const RunHistoryTable = () => {
     }
   }, []);
 
-  const getStatusBadge = (status) => {
+  const getStatusBadge = (status, errorMessage = null) => {
     switch (status) {
       case 'Running':
         return (
@@ -175,9 +175,19 @@ export const RunHistoryTable = () => {
         return <Badge variant="teal">Succeeded</Badge>;
       case 'Warnings':
         return <Badge variant="amber">Warnings</Badge>;
+      case 'Blocked':
+        return (
+          <span title={errorMessage || 'Blocked by pre-flight data guardrail'} className="inline-flex">
+            <Badge variant="amber">Blocked</Badge>
+          </span>
+        );
       case 'Failed':
       case 'Failed (provider)':
-        return <Badge variant="red">Failed</Badge>;
+        return (
+          <span title={errorMessage || undefined} className="inline-flex">
+            <Badge variant="red">Failed</Badge>
+          </span>
+        );
       default:
         return <Badge variant="gray">{status}</Badge>;
     }
@@ -775,7 +785,7 @@ export const RunHistoryTable = () => {
                           <span className="font-bold text-teal-700">{item.selected}</span>
                         )}
                       </td>
-                      <td className="py-3 px-3">{getStatusBadge(item.status)}</td>
+                      <td className="py-3 px-3">{getStatusBadge(item.status, item.error_message)}</td>
                       <td className="py-3 px-3 font-mono text-slate-600">{item.duration}</td>
                       <td className="py-3 px-3 text-right">
                         {isRunning ? (

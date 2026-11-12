@@ -63,7 +63,7 @@ class CompanyRuleEvaluation:
     """Complete rule evaluation verdict for one company against a profile."""
     canonical_company_id: str
     ticker: str
-    profile_version_id: str
+    profile_version_id: Optional[str]
     profile_name: str
 
     # Stage outcomes
@@ -115,10 +115,10 @@ class RuleEngine:
         """
         if isinstance(profile, list):
             raw_rules = profile
-            version_id = "prof-custom"
+            version_id = None
             profile_name = "Custom Strategy"
         else:
-            version_id = getattr(profile, "version_id", "prof-custom")
+            version_id = getattr(profile, "version_id", None)
             profile_name = getattr(profile, "profile_name", "Custom Strategy")
             raw_rules = getattr(profile, "rules", []) or []
 
@@ -129,7 +129,7 @@ class RuleEngine:
             profile_name=profile_name,
         )
 
-        logger.rule_info("START", metrics.ticker, f"Evaluating against profile '{profile_name}' ({version_id})")
+        logger.rule_info("START", metrics.ticker, f"Evaluating against profile '{profile_name}' ({version_id or 'ad-hoc'})")
 
         sum_points_earned = 0.0
         sum_active_weights = 0.0
