@@ -107,3 +107,32 @@ class ScreeningRunResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
     blocker_details: Optional[Dict[str, Any]] = None
+
+
+class DecisionExportItem(BaseModel):
+    """Analyst Keep/Drop decision payload item for export synchronization."""
+    canonical_company_id: str
+    company_name: Optional[str] = None
+    profile_name: Optional[str] = None
+    decision: str
+    decision_reason: Optional[str] = None
+    decision_note: Optional[str] = None
+    run_id: Optional[str] = None
+
+
+class EmailExportRequest(BaseModel):
+    """Payload to request emailing updated screening results with decisions attached."""
+    recipient_email: Optional[str] = Field(None, description="Recipient email address, defaults to authenticated user")
+    profile_name: Optional[str] = Field(None, description="Active strategy profile name")
+    decisions: Optional[List[DecisionExportItem]] = Field(default=None, description="Optional latest analyst decisions to sync and include")
+    memo_note: Optional[str] = Field(None, description="Optional analyst executive memo note to include in email body")
+
+
+class EmailExportResponse(BaseModel):
+    """Response returned after emailing screening results."""
+    success: bool
+    message: str
+    recipient: str
+    run_id: str
+    decisions_count: int = 0
+

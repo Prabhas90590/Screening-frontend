@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Download, Mail, ChevronDown } from 'lucide-react';
 import { useScreening } from '../../context/ScreeningContext';
 
 export const ResultsFilterBar = ({
@@ -14,7 +15,25 @@ export const ResultsFilterBar = ({
   holdingsUploadError,
   holdingsUploadSummary,
   exportResults,
+  openEmailModal,
 }) => {
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef(null);
+
+  // Close export dropdown menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+    if (isExportMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isExportMenuOpen]);
   const {
     resultsTab,
     setResultsTab,
@@ -33,6 +52,7 @@ export const ResultsFilterBar = ({
     sectors,
     countries,
     securities,
+    currentRun,
   } = useScreening();
 
   const selectedCountries = countries.filter((country) => country.selected);
@@ -61,19 +81,25 @@ export const ResultsFilterBar = ({
     (s) => s.deltaStatus === 'exited' || s.rankDelta === 'EXITED'
   ).length;
 
+  const totalEvaluatedCount =
+    typeof currentRun?.screened === 'number' && currentRun.screened > 0
+      ? currentRun.screened
+      : (securities?.length || 0);
+
   const tabs = [
     { id: 'top20', label: `🏆 Top 20 (${top20Count})` },
     { id: 'nearMisses', label: `⚠️ Near Misses (${nearMissCount})` },
-    { id: 'allScreened', label: `📋 All Evaluated (${securities.length})` },
+    { id: 'allScreened', label: `📋 All Evaluated (${totalEvaluatedCount.toLocaleString()})` },
     { id: 'changes', label: `🔄 Turnover (${enteredCount} In / ${exitedCount} Out)` },
     { id: 'myHoldings', label: holdings && holdings.length > 0 ? `💼 My Holdings (${holdings.length})` : '💼 My Holdings' },
   ];
 
   return (
     <div className="space-y-3">
-      {/* 5 Clean Primary Tabs */}
-      <div className="flex items-center justify-between border-b border-slate-200 overflow-x-auto pb-0.5">
-        <div className="flex space-x-6 sm:space-x-8 shrink-0">
+      {/* 5 Clean Primary Tabs & Action Bar */}
+      <div className="flex items-center justify-between border-b border-slate-200 gap-4 pb-0.5">
+        {/* Horizontally scrollable tabs */}
+        <div className="flex space-x-6 sm:space-x-8 overflow-x-auto pb-0.5 flex-1 min-w-0">
           {tabs.map((tab) => {
             const isActive = resultsTab === tab.id;
             return (
@@ -92,12 +118,83 @@ export const ResultsFilterBar = ({
           })}
         </div>
 
-        <button
-          onClick={exportResults}
-          className="mb-1.5 shrink-0 px-3 py-1.5 bg-[#e5a83b] hover:bg-[#d6982c] text-white text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer"
-        >
-          Export to Excel
-        </button>
+        {/* Unified Export to Excel Action with Dropdown Options */}
+        <div className="relative mb-1.5 shrink-0" ref={exportMenuRef}>
+          <button
+            type="button"
+            onClick={() => setIsExportMenuOpen((prev) => !prev)}
+            title="Export screening results"
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-[#e5a83b] hover:bg-[#d6982c] text-white text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer select-none"
+            aria-haspopup="true"
+            aria-expanded={isExportMenuOpen}
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export to Excel</span>
+            <ChevronDown
+              className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                isExportMenuOpen ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
+
+          {/* Export Options Dropdown Menu (Outside overflow-x-auto, free-floating) */}
+          {isExportMenuOpen && (
+            <div className="absolute right-0 top-full mt-1.5 w-76 bg-white rounded-xl shadow-2xl border border-slate-200/90 py-2 z-50 animate-in fade-in slide-in-from-top-1">
+              <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Select Export Option
+              </div>
+
+              {/* Option 1: Local Excel Download */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsExportMenuOpen(false);
+                  exportResults();
+                }}
+                className="w-full text-left px-3.5 py-2.5 hover:bg-amber-50/70 transition-colors flex items-center gap-3 cursor-pointer group"
+              >
+                <div className="w-8 h-8 rounded-lg bg-amber-100 text-[#e5a83b] group-hover:bg-[#e5a83b] group-hover:text-white flex items-center justify-center shrink-0 transition-colors shadow-2xs">
+                  <Download className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-slate-800 group-hover:text-amber-950">
+                    Download Excel (.xlsx)
+                  </div>
+                  <div className="text-[11px] text-slate-500 leading-tight mt-0.5">
+                    Save workbook directly to your computer
+                  </div>
+                </div>
+              </button>
+
+              <div className="border-t border-slate-100 my-1" />
+
+              {/* Option 2: Export Excel to Email with Decisions */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsExportMenuOpen(false);
+                  if (openEmailModal) openEmailModal();
+                }}
+                className="w-full text-left px-3.5 py-2.5 hover:bg-emerald-50/70 transition-colors flex items-center gap-3 cursor-pointer group"
+              >
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-[#147b73] group-hover:bg-[#147b73] group-hover:text-white flex items-center justify-center shrink-0 transition-colors shadow-2xs">
+                  <Mail className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-slate-800 group-hover:text-emerald-950 flex items-center gap-1.5">
+                    <span>Export Excel to Mail</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 bg-teal-100 text-teal-800 rounded">
+                      New
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 leading-tight mt-0.5">
+                    Send workbook with updated Keep / Drop decisions
+                  </div>
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Sub-pills when "Changes" is active */}

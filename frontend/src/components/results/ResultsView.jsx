@@ -1,17 +1,21 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ResultsSummaryCards } from './ResultsSummaryCards';
 import { ResultsFilterBar } from './ResultsFilterBar';
 import { ResultsTable } from './ResultsTable';
 import { SecurityDetailDrawer } from './SecurityDetailDrawer';
 import { ResultsLegend } from './ResultsLegend';
+import { EmailExportModal } from './EmailExportModal';
 import { useHoldingsImport } from './useHoldingsImport';
 import { exportResultsToExcel } from './exportResults';
 import { syncDecisionsApi } from '../../services/api';
 import { useScreening } from '../../context/ScreeningContext';
+import { useAuth } from '../../context/AuthContext';
 
 export const ResultsView = () => {
   const { selectedSecurity, resultsTab, securities, currentRun, activeProfile } = useScreening();
-  const [holdingsSubTab, setHoldingsSubTab] = React.useState('all');
+  const { user } = useAuth();
+  const [holdingsSubTab, setHoldingsSubTab] = useState('all');
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
   const holdingsImport = useHoldingsImport(securities);
 
   const activeProfileName =
@@ -63,6 +67,7 @@ export const ResultsView = () => {
           holdingsSubTab={holdingsSubTab}
           setHoldingsSubTab={setHoldingsSubTab}
           exportResults={handleExportWithSync}
+          openEmailModal={() => setIsEmailModalOpen(true)}
         />
 
         {/* 3. Streamlined 7-Column Results Table */}
@@ -77,6 +82,17 @@ export const ResultsView = () => {
 
       {/* 5. Slide-Over Inspector Drawer with 16-Metric Breakdown & Before vs After comparison */}
       {selectedSecurity && <SecurityDetailDrawer {...holdingsImport} />}
+
+      {/* 6. Email Screening Results & Analyst Decisions Export Modal */}
+      <EmailExportModal
+        isOpen={isEmailModalOpen}
+        onClose={() => setIsEmailModalOpen(false)}
+        runId={currentRun?.id || null}
+        profileName={activeProfileName}
+        securities={securities}
+        userEmail={user?.email || ''}
+        totalUniverseCount={typeof currentRun?.screened === 'number' && currentRun.screened > 0 ? currentRun.screened : securities.length}
+      />
     </div>
   );
 };

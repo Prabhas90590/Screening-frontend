@@ -169,7 +169,7 @@ export async function fetchScreeningRuns(limit = 50) {
 /**
  * Fetch detailed screening results for a specific run from the database.
  */
-export async function fetchScreeningResults(runId, view = 'all', limit = 250) {
+export async function fetchScreeningResults(runId, view = 'all', limit = 2000) {
   try {
     const res = await fetch(
       `${API_BASE}/screenings/${encodeURIComponent(runId)}/results?view=${encodeURIComponent(view)}&limit=${encodeURIComponent(limit)}`,
@@ -399,6 +399,31 @@ export async function syncDecisionsApi({ profile_name, run_id, decisions }) {
   } catch (err) {
     console.warn('[API] Could not sync decisions to backend:', err.message);
     return null;
+  }
+}
+
+/**
+ * Dispatch screening results workbook with latest analyst Keep/Drop decisions via email (Phase 18).
+ *
+ * @param {string} runId - Screening run UUID or identifier
+ * @param {Object} payload - { recipient_email, profile_name, decisions, memo_note }
+ * @returns {Promise<Object>} - { success, message, recipient, run_id, decisions_count }
+ */
+export async function emailExportResultsApi(runId, payload = {}) {
+  try {
+    const res = await fetch(`${API_BASE}/screenings/${encodeURIComponent(runId)}/email-export`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `HTTP ${res.status}: Failed to email export results`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.error('[API] Failed to email export results:', err.message);
+    throw err;
   }
 }
 

@@ -121,7 +121,7 @@ export const exportResultsToExcel = (securities = [], profileName = '') => {
       yieldDisplay,
       epsGrowthDisplay,
       sec.dataConfidence || 'High',
-      sec.decision ? sec.decision.toUpperCase() : 'PENDING',
+      sec.decision ? sec.decision.toUpperCase() : '',
       sec.decisionReason || '',
       note,
     ];

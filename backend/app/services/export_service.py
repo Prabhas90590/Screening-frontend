@@ -266,18 +266,18 @@ class ExportService:
 
             if is_displaced:
                 row_category = "Near Miss (Displaced)"
-                row_decision = user_decision or "NEAR MISS"
+                row_decision = user_decision or ""
                 row_reason = user_reason or (f"Displaced: {div_reason}" if div_reason else f"Rank cut-off outside selection (#{rank})")
                 row_note = user_note or (f"Diversification: {div_reason}" if div_reason else f"Rank #{rank} cut-off")
             elif is_rule_nm:
                 row_category = "Near Miss (Borderline)"
-                row_decision = user_decision or "NEAR MISS"
+                row_decision = user_decision or ""
                 row_reason = user_reason or "Single-gate borderline miss (within 5% threshold)"
                 row_note = user_note or "Borderline Rule Miss"
             elif category_label == "Top 20 Winner" or (rank and isinstance(rank, int) and rank <= 20 and sec_nm == "none"):
                 row_category = "Top 20 Winner"
-                row_decision = user_decision or "KEEP"
-                row_reason = user_reason or "Selected Core Portfolio Pick"
+                row_decision = user_decision or ""
+                row_reason = user_reason or ""
                 row_note = user_note or f"Top Pick #{rank}"
             else:
                 row_category = category_label
